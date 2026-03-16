@@ -9,6 +9,11 @@ const ADMIN_ID = Number(process.env.ADMIN_ID);
 const PORT = process.env.PORT || 8000;
 const PUBLIC_DOMAIN = process.env.KOYEB_PUBLIC_DOMAIN;
 
+// Change this for testing:
+// 1 minute = 1 * 60 * 1000
+// later for 30 minutes use: 30 * 60 * 1000
+const AUTO_DELETE_MS = 1 * 60 * 1000;
+
 // Validate environment variables
 if (!token) {
   console.error("Error: BOT_TOKEN is missing in environment variables.");
@@ -78,13 +83,53 @@ function getValidTickets() {
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
+function scheduleDelete(chatId, messageId) {
+  setTimeout(async () => {
+    try {
+      await bot.deleteMessage(chatId, String(messageId));
+      console.log(`Deleted message ${messageId} from chat ${chatId}`);
+    } catch (error) {
+      console.log(`Could not delete message ${messageId}: ${error.message}`);
+    }
+  }, AUTO_DELETE_MS);
+}
+
+function scheduleDeleteUserMessage(msg) {
+  if (!msg || !msg.chat || !msg.message_id) return;
+
+  setTimeout(async () => {
+    try {
+      await bot.deleteMessage(msg.chat.id, String(msg.message_id));
+      console.log(`Deleted user message ${msg.message_id} from chat ${msg.chat.id}`);
+    } catch (error) {
+      console.log(`Could not delete user message ${msg.message_id}: ${error.message}`);
+    }
+  }, AUTO_DELETE_MS);
+}
+
+async function sendAutoDeleteMessage(chatId, text, options = {}) {
+  const sent = await bot.sendMessage(chatId, text, options);
+  scheduleDelete(chatId, sent.message_id);
+  return sent;
+}
+
+async function sendAutoDeleteDocument(chatId, fileId, options = {}) {
+  const sent = await bot.sendDocument(chatId, fileId, options);
+  scheduleDelete(chatId, sent.message_id);
+  return sent;
+}
+
 // ---------------- Commands ----------------
-bot.onText(/\/start/, (msg) => {
+bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
   const validTickets = getValidTickets();
 
+  // Optional: also delete the user's /start message after 1 minute
+  scheduleDeleteUserMessage(msg);
+
   if (validTickets.length === 0) {
-    return bot.sendMessage(chatId, "No tickets available right now.");
+    await sendAutoDeleteMessage(chatId, "No tickets available right now.");
+    return;
   }
 
   const buttons = validTickets.map((ticket) => [
@@ -101,17 +146,24 @@ bot.onText(/\/start/, (msg) => {
     },
   ]);
 
-  bot.sendMessage(chatId, "Hello 👋\nPlease select your travel date:", {
-    reply_markup: {
-      inline_keyboard: buttons,
-    },
-  });
+  const sent = await bot.sendMessage(
+    chatId,
+    "Hello 👋\nPlease select your travel date:\n\n⏳ This message will be deleted automatically.",
+    {
+      reply_markup: {
+        inline_keyboard: buttons,
+      },
+    }
+  );
+
+  scheduleDelete(chatId, sent.message_id);
 });
 
-bot.onText(/\/help/, (msg) => {
+bot.onText(/\/help/, async (msg) => {
   const chatId = msg.chat.id;
+  scheduleDeleteUserMessage(msg);
 
-  bot.sendMessage(
+  await sendAutoDeleteMessage(
     chatId,
     `Available commands:
 
@@ -122,7 +174,9 @@ bot.onText(/\/help/, (msg) => {
 
 Admin only:
 Upload a PDF file with filename as date.
-Example: 2026-03-20.pdf`
+Example: 2026-03-20.pdf
+
+⏳ This message will be deleted automatically.`
   );
 });
 
@@ -136,67 +190,79 @@ bot.on("callback_query", async (query) => {
       const validTickets = getValidTickets();
 
       if (validTickets.length === 0) {
-        await bot.sendMessage(chatId, "No tickets available to download.");
-        return bot.answerCallbackQuery(query.id);
+        await sendAutoDeleteMessage(chatId, "No tickets available to download.");
+        await bot.answerCallbackQuery(query.id);
+        return;
       }
 
       for (const ticket of validTickets) {
-        await bot.sendDocument(chatId, ticket.file_id);
+        await sendAutoDeleteDocument(chatId, ticket.file_id);
       }
 
-      return bot.answerCallbackQuery(query.id, {
+      await bot.answerCallbackQuery(query.id, {
         text: "All available tickets sent.",
       });
+
+      return;
     }
 
     const ticket = loadTickets().find((t) => t.date === data);
 
     if (!ticket) {
-      await bot.sendMessage(chatId, "Ticket not found.");
-      return bot.answerCallbackQuery(query.id);
+      await sendAutoDeleteMessage(chatId, "Ticket not found.");
+      await bot.answerCallbackQuery(query.id);
+      return;
     }
 
-    await bot.sendDocument(chatId, ticket.file_id);
+    await sendAutoDeleteDocument(chatId, ticket.file_id);
+
     await bot.answerCallbackQuery(query.id, {
       text: `Ticket for ${ticket.date} sent.`,
     });
   } catch (error) {
     console.error("Callback query error:", error.message);
-    await bot.sendMessage(chatId, "Something went wrong while sending the ticket.");
+    await sendAutoDeleteMessage(chatId, "Something went wrong while sending the ticket.");
     await bot.answerCallbackQuery(query.id);
   }
 });
 
 // ---------------- Admin File Upload ----------------
-bot.on("document", (msg) => {
+bot.on("document", async (msg) => {
   const chatId = msg.chat.id;
 
+  // Optional: delete uploaded document message after 1 minute
+  scheduleDeleteUserMessage(msg);
+
   if (chatId !== ADMIN_ID) {
-    return bot.sendMessage(chatId, "You are not authorized to upload tickets.");
+    await sendAutoDeleteMessage(chatId, "You are not authorized to upload tickets.");
+    return;
   }
 
   const file = msg.document;
   const fileName = file.file_name || "";
 
   if (!fileName.toLowerCase().endsWith(".pdf")) {
-    return bot.sendMessage(chatId, "Please upload a PDF file.");
+    await sendAutoDeleteMessage(chatId, "Please upload a PDF file.");
+    return;
   }
 
   const date = fileName.replace(/\.pdf$/i, "").trim();
 
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRegex.test(date)) {
-    return bot.sendMessage(
+    await sendAutoDeleteMessage(
       chatId,
       "Invalid file name format.\nPlease upload file as YYYY-MM-DD.pdf\nExample: 2026-03-20.pdf"
     );
+    return;
   }
 
   const tickets = loadTickets();
   const existing = tickets.find((t) => t.date === date);
 
   if (existing) {
-    return bot.sendMessage(chatId, `Ticket for ${date} already exists.`);
+    await sendAutoDeleteMessage(chatId, `Ticket for ${date} already exists.`);
+    return;
   }
 
   tickets.push({
@@ -206,21 +272,24 @@ bot.on("document", (msg) => {
 
   saveTickets(tickets);
 
-  bot.sendMessage(chatId, `Ticket "${fileName}" uploaded successfully ✅`);
+  await sendAutoDeleteMessage(chatId, `Ticket "${fileName}" uploaded successfully ✅`);
 });
 
 // ---------------- Admin Commands ----------------
-bot.onText(/\/list/, (msg) => {
+bot.onText(/\/list/, async (msg) => {
   const chatId = msg.chat.id;
+  scheduleDeleteUserMessage(msg);
 
   if (chatId !== ADMIN_ID) {
-    return bot.sendMessage(chatId, "You are not authorized to use this command.");
+    await sendAutoDeleteMessage(chatId, "You are not authorized to use this command.");
+    return;
   }
 
   const tickets = loadTickets();
 
   if (tickets.length === 0) {
-    return bot.sendMessage(chatId, "No tickets found.");
+    await sendAutoDeleteMessage(chatId, "No tickets found.");
+    return;
   }
 
   const message = tickets
@@ -228,14 +297,16 @@ bot.onText(/\/list/, (msg) => {
     .map((ticket, index) => `${index + 1}. ${ticket.date}`)
     .join("\n");
 
-  bot.sendMessage(chatId, `Saved tickets:\n\n${message}`);
+  await sendAutoDeleteMessage(chatId, `Saved tickets:\n\n${message}`);
 });
 
-bot.onText(/\/delete (.+)/, (msg, match) => {
+bot.onText(/\/delete (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
+  scheduleDeleteUserMessage(msg);
 
   if (chatId !== ADMIN_ID) {
-    return bot.sendMessage(chatId, "You are not authorized to use this command.");
+    await sendAutoDeleteMessage(chatId, "You are not authorized to use this command.");
+    return;
   }
 
   const date = match[1].trim();
@@ -243,19 +314,22 @@ bot.onText(/\/delete (.+)/, (msg, match) => {
   const filteredTickets = tickets.filter((ticket) => ticket.date !== date);
 
   if (tickets.length === filteredTickets.length) {
-    return bot.sendMessage(chatId, `No ticket found for date ${date}.`);
+    await sendAutoDeleteMessage(chatId, `No ticket found for date ${date}.`);
+    return;
   }
 
   saveTickets(filteredTickets);
-  bot.sendMessage(chatId, `Ticket for ${date} deleted successfully ✅`);
+  await sendAutoDeleteMessage(chatId, `Ticket for ${date} deleted successfully ✅`);
 });
 
 // ---------------- Default Message ----------------
-bot.on("message", (msg) => {
+bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
 
   if (msg.text && !msg.text.startsWith("/") && !msg.document) {
-    bot.sendMessage(
+    scheduleDeleteUserMessage(msg);
+
+    await sendAutoDeleteMessage(
       chatId,
       "Hello 👋\nWelcome to Ticket Counter Bot.\n\nType /start to view available tickets."
     );
