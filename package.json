@@ -1,7 +1,7 @@
 {
-  "name": "ticket-bot",
+  "name": "ticket-bot-webhook",
   "version": "1.0.0",
-  "description": "Telegram Ticket Bot with Admin Upload",
+  "description": "Telegram Ticket Bot using webhook for Koyeb",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
