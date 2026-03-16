@@ -7,6 +7,7 @@ const path = require("path");
 const token = process.env.BOT_TOKEN;
 const ADMIN_ID = Number(process.env.ADMIN_ID);
 const PORT = process.env.PORT || 8000;
+const PUBLIC_DOMAIN = process.env.KOYEB_PUBLIC_DOMAIN;
 
 // Validate environment variables
 if (!token) {
@@ -19,20 +20,16 @@ if (!ADMIN_ID) {
   process.exit(1);
 }
 
-// Health check server for Koyeb
-http
-  .createServer((req, res) => {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("Bot is running");
-  })
-  .listen(PORT, () => {
-    console.log(`Health check server running on port ${PORT}`);
-  });
+if (!PUBLIC_DOMAIN) {
+  console.error("Error: KOYEB_PUBLIC_DOMAIN is missing.");
+  process.exit(1);
+}
 
-// Create bot instance
-const bot = new TelegramBot(token, { polling: true });
+const WEBHOOK_PATH = `/telegram/${token}`;
+const WEBHOOK_URL = `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}`;
 
-console.log("Telegram bot is running...");
+// Create bot in webhook mode
+const bot = new TelegramBot(token);
 
 // ---------------- Paths ----------------
 const ticketsFolder = path.join(__dirname, "tickets");
@@ -81,7 +78,7 @@ function getValidTickets() {
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
-// ---------------- /start Command ----------------
+// ---------------- Commands ----------------
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   const validTickets = getValidTickets();
@@ -111,7 +108,6 @@ bot.onText(/\/start/, (msg) => {
   });
 });
 
-// ---------------- /help Command ----------------
 bot.onText(/\/help/, (msg) => {
   const chatId = msg.chat.id;
 
@@ -121,6 +117,8 @@ bot.onText(/\/help/, (msg) => {
 
 /start - View available tickets
 /help - Show help message
+/list - View saved tickets (admin only)
+/delete YYYY-MM-DD - Delete a ticket by date (admin only)
 
 Admin only:
 Upload a PDF file with filename as date.
@@ -252,7 +250,7 @@ bot.onText(/\/delete (.+)/, (msg, match) => {
   bot.sendMessage(chatId, `Ticket for ${date} deleted successfully ✅`);
 });
 
-// ---------------- Message Handler ----------------
+// ---------------- Default Message ----------------
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
 
@@ -264,11 +262,56 @@ bot.on("message", (msg) => {
   }
 });
 
-// ---------------- Error Handling ----------------
-bot.on("polling_error", (error) => {
-  console.error("Polling error:", error.message);
+// ---------------- HTTP Server ----------------
+const server = http.createServer((req, res) => {
+  if (req.method === "POST" && req.url === WEBHOOK_PATH) {
+    let body = "";
+
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+
+    req.on("end", async () => {
+      try {
+        const update = JSON.parse(body);
+        bot.processUpdate(update);
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("OK");
+      } catch (error) {
+        console.error("Webhook processing error:", error.message);
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end("Error");
+      }
+    });
+
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Ticket bot webhook is running");
+    return;
+  }
+
+  res.writeHead(404, { "Content-Type": "text/plain" });
+  res.end("Not Found");
 });
 
+// ---------------- Start Server and Set Webhook ----------------
+server.listen(PORT, async () => {
+  console.log(`Server is listening on port ${PORT}`);
+  console.log(`Webhook path: ${WEBHOOK_PATH}`);
+  console.log(`Webhook URL: ${WEBHOOK_URL}`);
+
+  try {
+    await bot.setWebHook(WEBHOOK_URL);
+    console.log("Webhook set successfully");
+  } catch (error) {
+    console.error("Failed to set webhook:", error.message);
+  }
+});
+
+// ---------------- Error Handling ----------------
 process.on("uncaughtException", (error) => {
   console.error("Uncaught Exception:", error.message);
 });
