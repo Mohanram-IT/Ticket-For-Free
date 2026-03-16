@@ -1,3 +1,4 @@
+const http = require("http");
 const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs");
 const path = require("path");
@@ -5,6 +6,7 @@ const path = require("path");
 // Environment variables
 const token = process.env.BOT_TOKEN;
 const ADMIN_ID = Number(process.env.ADMIN_ID);
+const PORT = process.env.PORT || 8000;
 
 // Validate environment variables
 if (!token) {
@@ -17,10 +19,20 @@ if (!ADMIN_ID) {
   process.exit(1);
 }
 
+// Health check server for Koyeb
+http
+  .createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("Bot is running");
+  })
+  .listen(PORT, () => {
+    console.log(`Health check server running on port ${PORT}`);
+  });
+
 // Create bot instance
 const bot = new TelegramBot(token, { polling: true });
 
-console.log("Bot is running...");
+console.log("Telegram bot is running...");
 
 // ---------------- Paths ----------------
 const ticketsFolder = path.join(__dirname, "tickets");
@@ -174,7 +186,6 @@ bot.on("document", (msg) => {
 
   const date = fileName.replace(/\.pdf$/i, "").trim();
 
-  // Simple date format check: YYYY-MM-DD
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRegex.test(date)) {
     return bot.sendMessage(
@@ -201,8 +212,6 @@ bot.on("document", (msg) => {
 });
 
 // ---------------- Admin Commands ----------------
-
-// View all tickets
 bot.onText(/\/list/, (msg) => {
   const chatId = msg.chat.id;
 
@@ -224,7 +233,6 @@ bot.onText(/\/list/, (msg) => {
   bot.sendMessage(chatId, `Saved tickets:\n\n${message}`);
 });
 
-// Delete ticket by date
 bot.onText(/\/delete (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
 
