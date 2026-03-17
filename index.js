@@ -7,7 +7,7 @@ const path = require("path");
 const fs = require("fs");
 
 // ---------------- ENV ----------------
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT; // Use environment-provided port
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const ADMIN_ID = Number(process.env.ADMIN_ID);
 const MONGO_URI = process.env.MONGO_URI;
@@ -167,6 +167,7 @@ app.get("/download/:id", async (req, res) => {
 
 // ---------------- HEALTH CHECK ----------------
 app.get("/health", (req, res) => {
+  console.log("Health check received!"); // For debugging
   res.status(200).send("OK");
 });
 
@@ -203,4 +204,6 @@ bot.on("callback_query", async (query) => {
 });
 
 // ---------------- SERVER ----------------
-app.listen(PORT, () => console.log(`Server running on port ${PORT} 🚀`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT} 🚀`);
+});
