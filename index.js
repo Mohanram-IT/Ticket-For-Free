@@ -165,6 +165,11 @@ app.get("/download/:id", async (req, res) => {
   res.download(ticket.file_path, path.basename(ticket.file_path));
 });
 
+// ---------------- HEALTH CHECK ----------------
+app.get("/health", (req, res) => {
+  res.status(200).send("OK");
+});
+
 // ---------------- TELEGRAM BOT ----------------
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
