@@ -8,216 +8,234 @@ const ADMIN_ID = Number(process.env.ADMIN_ID);
 const PORT = process.env.PORT || 8000;
 const PUBLIC_DOMAIN = process.env.KOYEB_PUBLIC_DOMAIN;
 const MONGO_URI = process.env.MONGO_URI;
+const ADMIN_KEY = process.env.ADMIN_KEY;
 
-// ---------------- VALIDATION ----------------
-if (!token) { console.error("BOT_TOKEN missing"); process.exit(1); }
-if (!ADMIN_ID) { console.error("ADMIN_ID missing"); process.exit(1); }
-if (!PUBLIC_DOMAIN) { console.error("KOYEB_PUBLIC_DOMAIN missing"); process.exit(1); }
-if (!MONGO_URI) { console.error("MONGO_URI missing"); process.exit(1); }
+if (!token || !ADMIN_ID || !PUBLIC_DOMAIN || !MONGO_URI || !ADMIN_KEY) {
+  console.error("Missing ENV ❌");
+  process.exit(1);
+}
 
-// ---------------- WEBHOOK ----------------
+// ---------------- SETUP ----------------
+const bot = new TelegramBot(token);
 const WEBHOOK_PATH = `/telegram/${token}`;
 const WEBHOOK_URL = `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}`;
 
-// ---------------- TELEGRAM BOT ----------------
-const bot = new TelegramBot(token);
-
-// ---------------- MONGODB ----------------
 const client = new MongoClient(MONGO_URI);
-let ticketsCollection;
+let ticketsCollection, logsCollection;
 
+// ---------------- CONNECT DB ----------------
 async function connectDB() {
   await client.connect();
   const db = client.db("ticket_bot");
   ticketsCollection = db.collection("tickets");
+  logsCollection = db.collection("logs");
   console.log("MongoDB connected ✅");
 }
-connectDB();
 
 // ---------------- HELPERS ----------------
-async function loadTickets() {
-  return await ticketsCollection.find().toArray();
-}
-
 async function getValidTickets() {
-  const tickets = await loadTickets();
+  const tickets = await ticketsCollection.find().toArray();
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return tickets
-    .filter((t) => new Date(t.date) >= today)
-    .sort((a, b) => new Date(a.date) - new Date(b.date));
+  today.setHours(0,0,0,0);
+  return tickets.filter(t => new Date(t.date) >= today);
 }
 
-// ---------------- SCHEDULE DELETION ----------------
-function scheduleDeleteNextMidnight(chatId, messageId) {
-  const now = new Date();
-  const nextMidnight = new Date(now);
-  nextMidnight.setDate(now.getDate() + 1);
-  nextMidnight.setHours(0, 0, 0, 0);
-  const msUntilMidnight = nextMidnight - now;
-
-  setTimeout(async () => {
-    try {
-      await bot.deleteMessage(chatId, String(messageId));
-      console.log(`Deleted message ${messageId} from chat ${chatId} at next midnight`);
-    } catch (error) {
-      console.log(`Could not delete message ${messageId}: ${error.message}`);
-    }
-  }, msUntilMidnight);
+async function logDownload(user, date) {
+  await logsCollection.insertOne({
+    user_id: user.id,
+    username: user.username || "unknown",
+    date,
+    time: new Date()
+  });
 }
 
-function scheduleDeleteUserMessage(msg) {
-  if (!msg?.chat?.id) return;
-  scheduleDeleteNextMidnight(msg.chat.id, msg.message_id);
-}
-
-async function sendAutoDeleteMessage(chatId, text, options = {}) {
-  const sent = await bot.sendMessage(chatId, text, options);
-  scheduleDeleteNextMidnight(chatId, sent.message_id);
-  return sent;
-}
-
-async function sendAutoDeleteDocument(chatId, fileId, options = {}) {
-  const sent = await bot.sendDocument(chatId, fileId, options);
-  scheduleDeleteNextMidnight(chatId, sent.message_id);
-  return sent;
-}
-
-// ---------------- COMMANDS ----------------
+// ---------------- BOT ----------------
 bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
-  scheduleDeleteUserMessage(msg);
 
   const tickets = await getValidTickets();
-  if (tickets.length === 0) {
-    return sendAutoDeleteMessage(chatId, "No tickets available right now.");
-  }
+  if (!tickets.length) return bot.sendMessage(chatId, "❌ No tickets");
 
-  const buttons = tickets.map((t) => [{ text: t.date, callback_data: t.date }]);
-  buttons.push([{ text: "📥 Download All Tickets", callback_data: "download_all" }]);
+  const buttons = tickets.map(t => [{ text: t.date, callback_data: t.date }]);
 
-  const sent = await bot.sendMessage(chatId, "Hello 👋\nSelect your travel date:", {
-    reply_markup: { inline_keyboard: buttons },
+  bot.sendMessage(chatId, "🚆 Select Date", {
+    reply_markup: { inline_keyboard: buttons }
   });
-
-  scheduleDeleteNextMidnight(chatId, sent.message_id);
 });
 
-// ---------------- CALLBACK ----------------
-bot.on("callback_query", async (query) => {
-  const chatId = query.message.chat.id;
-  const data = query.data;
+bot.on("callback_query", async (q) => {
+  const ticket = await ticketsCollection.findOne({ date: q.data });
+  if (!ticket) return;
 
-  try {
-    if (data === "download_all") {
-      const tickets = await getValidTickets();
-      if (tickets.length === 0) {
-        await sendAutoDeleteMessage(chatId, "No tickets available to download.");
-        return bot.answerCallbackQuery(query.id);
-      }
-      for (const t of tickets) await sendAutoDeleteDocument(chatId, t.file_id);
-      return bot.answerCallbackQuery(query.id, { text: "All tickets sent." });
-    }
-
-    const ticket = await ticketsCollection.findOne({ date: data });
-    if (!ticket) {
-      await sendAutoDeleteMessage(chatId, "Ticket not found.");
-      return bot.answerCallbackQuery(query.id);
-    }
-
-    await sendAutoDeleteDocument(chatId, ticket.file_id);
-    bot.answerCallbackQuery(query.id, { text: `Ticket for ${ticket.date} sent.` });
-  } catch (error) {
-    console.error(error);
-    await sendAutoDeleteMessage(chatId, "Something went wrong.");
-    bot.answerCallbackQuery(query.id);
-  }
+  await bot.sendDocument(q.message.chat.id, ticket.file_id);
+  await logDownload(q.from, ticket.date);
 });
 
-// ---------------- UPLOAD ----------------
-bot.on("document", async (msg) => {
-  const chatId = msg.chat.id;
-  scheduleDeleteUserMessage(msg);
+// ---------------- SERVER ----------------
+const server = http.createServer(async (req, res) => {
 
-  if (chatId !== ADMIN_ID) return sendAutoDeleteMessage(chatId, "Not authorized.");
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const pathname = url.pathname;
+  const key = url.searchParams.get("key");
 
-  const file = msg.document;
-  const fileName = file.file_name;
-  if (!fileName.toLowerCase().endsWith(".pdf")) return sendAutoDeleteMessage(chatId, "Upload PDF only.");
-
-  const date = fileName.replace(/\.pdf$/i, "").trim();
-  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!dateRegex.test(date)) return sendAutoDeleteMessage(chatId, "Filename must be YYYY-MM-DD.pdf");
-
-  const exists = await ticketsCollection.findOne({ date });
-  if (exists) return sendAutoDeleteMessage(chatId, "Ticket already exists.");
-
-  await ticketsCollection.insertOne({ date, file_id: file.file_id });
-  sendAutoDeleteMessage(chatId, `Ticket "${fileName}" uploaded successfully ✅`);
-});
-
-// ---------------- ADMIN COMMANDS ----------------
-bot.onText(/\/list/, async (msg) => {
-  const chatId = msg.chat.id;
-  scheduleDeleteUserMessage(msg);
-
-  if (chatId !== ADMIN_ID) return sendAutoDeleteMessage(chatId, "Not authorized.");
-  const tickets = await loadTickets();
-  if (tickets.length === 0) return sendAutoDeleteMessage(chatId, "No tickets found.");
-
-  const text = tickets.sort((a,b)=> new Date(a.date) - new Date(b.date))
-                      .map((t,i)=> `${i+1}. ${t.date}`).join("\n");
-  sendAutoDeleteMessage(chatId, text);
-});
-
-bot.onText(/\/delete (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id;
-  scheduleDeleteUserMessage(msg);
-
-  if (chatId !== ADMIN_ID) return sendAutoDeleteMessage(chatId, "Not authorized.");
-  const date = match[1].trim();
-  const result = await ticketsCollection.deleteOne({ date });
-
-  if (result.deletedCount === 0) return sendAutoDeleteMessage(chatId, "Ticket not found.");
-  sendAutoDeleteMessage(chatId, `Ticket for ${date} deleted ✅`);
-});
-
-// ---------------- DEFAULT MESSAGE ----------------
-bot.on("message", async (msg) => {
-  if (msg.text && !msg.text.startsWith("/") && !msg.document) {
-    scheduleDeleteUserMessage(msg);
-    await sendAutoDeleteMessage(msg.chat.id, "Hello 👋\nUse /start to view available tickets.");
-  }
-});
-
-// ---------------- HTTP SERVER ----------------
-const server = http.createServer((req, res) => {
-  if (req.method === "POST" && req.url === WEBHOOK_PATH) {
-    let body = "";
-    req.on("data", chunk => body += chunk);
-    req.on("end", async () => {
+  // ---- TELEGRAM ----
+  if (req.method === "POST" && pathname === WEBHOOK_PATH) {
+    let body="";
+    req.on("data", c => body+=c);
+    req.on("end", ()=>{
       bot.processUpdate(JSON.parse(body));
-      res.writeHead(200);
       res.end("OK");
     });
     return;
   }
 
-  res.writeHead(200);
+  // ---- ADMIN AUTH ----
+  if (pathname.startsWith("/admin") && key !== ADMIN_KEY) {
+    res.end("❌ Unauthorized");
+    return;
+  }
+
+  // ---- DELETE API ----
+  if (pathname === "/delete") {
+    const date = url.searchParams.get("date");
+    await ticketsCollection.deleteOne({ date });
+    res.writeHead(302, { Location: `/admin?key=${ADMIN_KEY}` });
+    res.end();
+    return;
+  }
+
+  // ---- DOWNLOAD API ----
+  if (pathname === "/download") {
+    const date = url.searchParams.get("date");
+    const ticket = await ticketsCollection.findOne({ date });
+
+    if (ticket) {
+      await bot.sendDocument(ADMIN_ID, ticket.file_id);
+    }
+
+    res.writeHead(302, { Location: `/admin?key=${ADMIN_KEY}` });
+    res.end();
+    return;
+  }
+
+  // ---- DASHBOARD ----
+  if (pathname === "/admin") {
+    const tickets = await ticketsCollection.find().sort({date:1}).toArray();
+    const logs = await logsCollection.find().sort({time:-1}).limit(10).toArray();
+
+    res.writeHead(200, {"Content-Type":"text/html"});
+    res.end(`
+<!DOCTYPE html>
+<html>
+<head>
+<title>Dashboard</title>
+<style>
+body {
+  font-family: Arial;
+  background: #0f172a;
+  color: white;
+  margin:0;
+}
+.header {
+  padding:20px;
+  background:#1e293b;
+  font-size:24px;
+}
+.container { padding:20px; }
+
+.card {
+  background:#1e293b;
+  padding:15px;
+  margin-bottom:20px;
+  border-radius:10px;
+}
+
+table {
+  width:100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding:10px;
+  border-bottom:1px solid #334155;
+}
+
+th { color:#94a3b8; }
+
+.btn {
+  padding:6px 10px;
+  border-radius:5px;
+  text-decoration:none;
+  color:white;
+}
+
+.delete { background:#ef4444; }
+.download { background:#22c55e; }
+
+</style>
+</head>
+
+<body>
+
+<div class="header">🚀 Ticket Bot Dashboard</div>
+
+<div class="container">
+
+<div class="card">
+<h2>📊 Stats</h2>
+<p>Total Tickets: ${tickets.length}</p>
+<p>Total Downloads: ${await logsCollection.countDocuments()}</p>
+</div>
+
+<div class="card">
+<h2>🎫 Tickets</h2>
+<table>
+<tr><th>Date</th><th>Actions</th></tr>
+
+${tickets.map(t => `
+<tr>
+<td>${t.date}</td>
+<td>
+<a class="btn download" href="/download?key=${ADMIN_KEY}&date=${t.date}">⬇️</a>
+<a class="btn delete" href="/delete?key=${ADMIN_KEY}&date=${t.date}">❌</a>
+</td>
+</tr>
+`).join("")}
+
+</table>
+</div>
+
+<div class="card">
+<h2>📥 Recent Downloads</h2>
+<table>
+<tr><th>User</th><th>Date</th><th>Time</th></tr>
+
+${logs.map(l => `
+<tr>
+<td>${l.username}</td>
+<td>${l.date}</td>
+<td>${new Date(l.time).toLocaleString()}</td>
+</tr>
+`).join("")}
+
+</table>
+</div>
+
+</div>
+
+</body>
+</html>
+`);
+    return;
+  }
+
+  // ---- DEFAULT ----
   res.end("Ticket bot running");
 });
 
-// ---------------- START SERVER ----------------
+// ---------------- START ----------------
 server.listen(PORT, async () => {
-  console.log(`Server running on port ${PORT}`);
-  try {
-    await bot.setWebHook(WEBHOOK_URL);
-    console.log(`Webhook set at ${WEBHOOK_URL}`);
-  } catch (error) {
-    console.error("Failed to set webhook:", error.message);
-  }
+  await connectDB();
+  await bot.setWebHook(WEBHOOK_URL);
+  console.log("Server running 🚀");
 });
-
-// ---------------- ERROR HANDLING ----------------
-process.on("uncaughtException", (error) => console.error("Uncaught Exception:", error));
-process.on("unhandledRejection", (error) => console.error("Unhandled Rejection:", error));
