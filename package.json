@@ -1,13 +1,16 @@
 {
   "name": "ticket-bot-webhook",
   "version": "1.0.0",
-  "description": "Telegram Ticket Bot using webhook for Koyeb",
+  "description": "Telegram Ticket Bot using webhook for Koyeb with web dashboard",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "mongodb": "^7.1.0",
-    "node-telegram-bot-api": "^0.66.0"
+    "node-telegram-bot-api": "^0.66.0",
+    "express": "^4.18.2",
+    "express-basic-auth": "^1.2.1",
+    "body-parser": "^1.20.2"
   }
 }
