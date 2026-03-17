@@ -123,7 +123,7 @@ const server = http.createServer(async (req, res) => {
     const tickets = await ticketsCollection.find().sort({date:1}).toArray();
     const logs = await logsCollection.find().sort({time:-1}).limit(10).toArray();
 
-    res.writeHead(200, {"Content-Type":"text/html"});
+    res.writeHead(200, {"Content-Type":"text/html; charset=utf-8"});
     res.end(`
 <!DOCTYPE html>
 <html>
