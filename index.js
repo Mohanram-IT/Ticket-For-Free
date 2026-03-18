@@ -237,11 +237,50 @@ function renderFlash(flash) {
   `;
 }
 
-function soundAndCursorScript() {
+function themeAndInteractionScript() {
   return `
     <div id="train-cursor" aria-hidden="true">🚂</div>
+
+    <div id="pdf-modal" class="pdf-modal hidden" aria-hidden="true">
+      <div class="pdf-backdrop"></div>
+      <div class="pdf-dialog">
+        <div class="pdf-header">
+          <div class="pdf-title">📄 Ticket Preview</div>
+          <button class="btn btn-dark pdf-close" type="button" id="pdf-close-btn">✖ Close</button>
+        </div>
+        <div class="pdf-frame-wrap">
+          <iframe id="pdf-frame" title="Ticket PDF Preview"></iframe>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-loader" class="page-loader hidden" aria-hidden="true">
+      <div class="page-loader-backdrop"></div>
+      <div class="page-loader-box">
+        <div class="loader-train-track">
+          <div class="loader-train">🚂</div>
+        </div>
+        <h3>Train is arriving...</h3>
+        <p>Please wait while we move you to the dashboard.</p>
+      </div>
+    </div>
+
     <script>
       (function () {
+        const root = document.documentElement;
+        const savedTheme = localStorage.getItem("ticket_theme") || "dark";
+        root.setAttribute("data-theme", savedTheme);
+
+        const themeButtons = document.querySelectorAll("[data-theme-toggle]");
+        themeButtons.forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const current = root.getAttribute("data-theme") || "dark";
+            const next = current === "dark" ? "light" : "dark";
+            root.setAttribute("data-theme", next);
+            localStorage.setItem("ticket_theme", next);
+          });
+        });
+
         const cursor = document.getElementById("train-cursor");
         let mouseX = window.innerWidth / 2;
         let mouseY = window.innerHeight / 2;
@@ -249,8 +288,8 @@ function soundAndCursorScript() {
         let currentY = mouseY;
 
         function animateCursor() {
-          currentX += (mouseX - currentX) * 0.18;
-          currentY += (mouseY - currentY) * 0.18;
+          currentX += (mouseX - currentX) * 0.16;
+          currentY += (mouseY - currentY) * 0.16;
           if (cursor) {
             cursor.style.transform = "translate(" + currentX + "px, " + currentY + "px)";
           }
@@ -270,7 +309,7 @@ function soundAndCursorScript() {
           if (cursor) cursor.style.opacity = "1";
         });
 
-        function playTrainHorn() {
+        function playLongTrainHorn() {
           try {
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
             if (!AudioCtx) return;
@@ -279,53 +318,180 @@ function soundAndCursorScript() {
 
             const master = ctx.createGain();
             master.gain.setValueAtTime(0.0001, now);
-            master.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
-            master.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+            master.gain.exponentialRampToValueAtTime(0.18, now + 0.05);
+            master.gain.exponentialRampToValueAtTime(0.0001, now + 1.8);
             master.connect(ctx.destination);
 
             const osc1 = ctx.createOscillator();
             const osc2 = ctx.createOscillator();
+            const osc3 = ctx.createOscillator();
+
             const gain1 = ctx.createGain();
             const gain2 = ctx.createGain();
+            const gain3 = ctx.createGain();
 
             osc1.type = "sawtooth";
             osc2.type = "square";
+            osc3.type = "triangle";
 
             osc1.frequency.setValueAtTime(220, now);
-            osc1.frequency.exponentialRampToValueAtTime(180, now + 0.55);
+            osc1.frequency.linearRampToValueAtTime(185, now + 1.6);
 
             osc2.frequency.setValueAtTime(330, now);
-            osc2.frequency.exponentialRampToValueAtTime(260, now + 0.55);
+            osc2.frequency.linearRampToValueAtTime(265, now + 1.6);
 
-            gain1.gain.value = 0.55;
-            gain2.gain.value = 0.25;
+            osc3.frequency.setValueAtTime(440, now);
+            osc3.frequency.linearRampToValueAtTime(360, now + 1.6);
+
+            gain1.gain.value = 0.42;
+            gain2.gain.value = 0.22;
+            gain3.gain.value = 0.12;
 
             osc1.connect(gain1);
             osc2.connect(gain2);
+            osc3.connect(gain3);
+
             gain1.connect(master);
             gain2.connect(master);
+            gain3.connect(master);
 
             osc1.start(now);
             osc2.start(now);
-            osc1.stop(now + 0.58);
-            osc2.stop(now + 0.58);
+            osc3.start(now);
+
+            osc1.stop(now + 1.8);
+            osc2.stop(now + 1.8);
+            osc3.stop(now + 1.8);
 
             setTimeout(() => {
               try { ctx.close(); } catch (_) {}
-            }, 800);
+            }, 2200);
+          } catch (_) {}
+        }
+
+        function playRunningTrainSound(durationMs = 1800) {
+          try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            const now = ctx.currentTime;
+            const master = ctx.createGain();
+            master.gain.setValueAtTime(0.0001, now);
+            master.gain.exponentialRampToValueAtTime(0.09, now + 0.05);
+            master.connect(ctx.destination);
+
+            const bufferSize = 2 * ctx.sampleRate;
+            const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+              output[i] = Math.random() * 2 - 1;
+            }
+
+            const noise = ctx.createBufferSource();
+            noise.buffer = noiseBuffer;
+            noise.loop = true;
+
+            const bandpass = ctx.createBiquadFilter();
+            bandpass.type = "bandpass";
+            bandpass.frequency.value = 120;
+            bandpass.Q.value = 0.8;
+
+            const tremolo = ctx.createGain();
+            tremolo.gain.value = 0.35;
+
+            const lfo = ctx.createOscillator();
+            const lfoGain = ctx.createGain();
+            lfo.frequency.value = 8;
+            lfoGain.gain.value = 0.22;
+
+            lfo.connect(lfoGain);
+            lfoGain.connect(tremolo.gain);
+
+            noise.connect(bandpass);
+            bandpass.connect(tremolo);
+            tremolo.connect(master);
+
+            noise.start(now);
+            lfo.start(now);
+
+            master.gain.exponentialRampToValueAtTime(0.0001, now + durationMs / 1000);
+
+            noise.stop(now + durationMs / 1000);
+            lfo.stop(now + durationMs / 1000);
+
+            setTimeout(() => {
+              try { ctx.close(); } catch (_) {}
+            }, durationMs + 400);
           } catch (_) {}
         }
 
         document.addEventListener("click", function (e) {
           const clickable = e.target.closest("a, button");
           if (!clickable) return;
-          playTrainHorn();
+
+          playLongTrainHorn();
 
           if (cursor) {
             cursor.classList.remove("cursor-pop");
             void cursor.offsetWidth;
             cursor.classList.add("cursor-pop");
           }
+        });
+
+        const loader = document.getElementById("page-loader");
+        document.querySelectorAll("form[data-login-form]").forEach((form) => {
+          form.addEventListener("submit", function () {
+            if (loader) {
+              loader.classList.remove("hidden");
+              loader.setAttribute("aria-hidden", "false");
+            }
+            playRunningTrainSound(2200);
+          });
+        });
+
+        const modal = document.getElementById("pdf-modal");
+        const pdfFrame = document.getElementById("pdf-frame");
+        const closeBtn = document.getElementById("pdf-close-btn");
+
+        function openPdfModal(url) {
+          if (!modal || !pdfFrame) return;
+          pdfFrame.src = url;
+          modal.classList.remove("hidden");
+          modal.setAttribute("aria-hidden", "false");
+          document.body.classList.add("modal-open");
+          playRunningTrainSound(1600);
+        }
+
+        function closePdfModal() {
+          if (!modal || !pdfFrame) return;
+          modal.classList.add("hidden");
+          modal.setAttribute("aria-hidden", "true");
+          pdfFrame.src = "";
+          document.body.classList.remove("modal-open");
+        }
+
+        document.querySelectorAll("[data-view-pdf]").forEach((btn) => {
+          btn.addEventListener("click", function (e) {
+            e.preventDefault();
+            const url = btn.getAttribute("data-view-pdf");
+            if (url) openPdfModal(url);
+          });
+        });
+
+        if (closeBtn) {
+          closeBtn.addEventListener("click", closePdfModal);
+        }
+
+        if (modal) {
+          modal.addEventListener("click", function (e) {
+            if (e.target.classList.contains("pdf-backdrop")) {
+              closePdfModal();
+            }
+          });
+        }
+
+        document.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") closePdfModal();
         });
 
         animateCursor();
@@ -337,21 +503,45 @@ function soundAndCursorScript() {
 function dashboardLayout(title, content) {
   return `
   <!DOCTYPE html>
-  <html>
+  <html data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)}</title>
     <style>
-      :root{
-        --bg1:#0f172a;
-        --bg2:#111827;
-        --text:#f8fafc;
-        --muted:#cbd5e1;
-        --soft:#94a3b8;
+      :root {
+        --bg-grad-1: #020617;
+        --bg-grad-2: #0f172a;
+        --bg-grad-3: #111827;
+        --text: #f8fafc;
+        --muted: #cbd5e1;
+        --soft: #94a3b8;
+        --line: rgba(255,255,255,.10);
+        --card: rgba(255,255,255,.055);
+        --card-strong: rgba(255,255,255,.075);
+        --backdrop: rgba(15,23,42,.72);
+        --input: rgba(2,6,23,.55);
+        --shadow: 0 14px 38px rgba(0,0,0,.20);
+        --shadow-big: 0 20px 60px rgba(0,0,0,.25);
       }
 
-      * { box-sizing:border-box; }
+      html[data-theme="light"] {
+        --bg-grad-1: #eef6ff;
+        --bg-grad-2: #f8fafc;
+        --bg-grad-3: #e2e8f0;
+        --text: #0f172a;
+        --muted: #334155;
+        --soft: #475569;
+        --line: rgba(15,23,42,.12);
+        --card: rgba(255,255,255,.78);
+        --card-strong: rgba(255,255,255,.90);
+        --backdrop: rgba(255,255,255,.78);
+        --input: rgba(255,255,255,.92);
+        --shadow: 0 14px 38px rgba(15,23,42,.10);
+        --shadow-big: 0 20px 60px rgba(15,23,42,.12);
+      }
+
+      * { box-sizing: border-box; }
 
       html, body {
         cursor: none;
@@ -365,8 +555,12 @@ function dashboardLayout(title, content) {
           radial-gradient(circle at top left, rgba(59,130,246,.20), transparent 28%),
           radial-gradient(circle at top right, rgba(236,72,153,.18), transparent 24%),
           radial-gradient(circle at bottom left, rgba(34,197,94,.15), transparent 24%),
-          linear-gradient(135deg, #020617 0%, #0f172a 38%, #111827 100%);
+          linear-gradient(135deg, var(--bg-grad-1) 0%, var(--bg-grad-2) 38%, var(--bg-grad-3) 100%);
         min-height: 100vh;
+      }
+
+      body.modal-open {
+        overflow: hidden;
       }
 
       a, button, input, label, form {
@@ -398,14 +592,23 @@ function dashboardLayout(title, content) {
       .topbar {
         position: sticky;
         top: 0;
-        z-index: 10;
+        z-index: 20;
         padding: 18px 24px;
         font-size: 22px;
         font-weight: 800;
         backdrop-filter: blur(14px);
-        background: rgba(15, 23, 42, 0.72);
-        border-bottom: 1px solid rgba(255,255,255,.08);
-        box-shadow: 0 8px 24px rgba(0,0,0,.22);
+        background: var(--backdrop);
+        border-bottom: 1px solid var(--line);
+        box-shadow: 0 8px 24px rgba(0,0,0,.12);
+      }
+
+      .topbar-inner {
+        max-width: 1240px;
+        margin: 0 auto;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
       }
 
       .wrap {
@@ -420,10 +623,10 @@ function dashboardLayout(title, content) {
         border-radius: 24px;
         background:
           linear-gradient(135deg, rgba(59,130,246,.18), rgba(139,92,246,.16), rgba(236,72,153,.15)),
-          rgba(255,255,255,.04);
-        border: 1px solid rgba(255,255,255,.08);
+          var(--card);
+        border: 1px solid var(--line);
         backdrop-filter: blur(12px);
-        box-shadow: 0 20px 60px rgba(0,0,0,.25);
+        box-shadow: var(--shadow-big);
         animation: fadeUp .55s ease;
       }
 
@@ -440,13 +643,13 @@ function dashboardLayout(title, content) {
       }
 
       .card {
-        background: rgba(255,255,255,.055);
-        border: 1px solid rgba(255,255,255,.08);
+        background: var(--card);
+        border: 1px solid var(--line);
         border-radius: 22px;
         padding: 20px;
         margin-bottom: 20px;
         backdrop-filter: blur(12px);
-        box-shadow: 0 14px 38px rgba(0,0,0,.20);
+        box-shadow: var(--shadow);
         animation: fadeUp .55s ease;
       }
 
@@ -455,7 +658,6 @@ function dashboardLayout(title, content) {
       .mb8 { margin-bottom: 8px; }
       .mb12 { margin-bottom: 12px; }
       .mb16 { margin-bottom: 16px; }
-      .mb20 { margin-bottom: 20px; }
 
       .row {
         display: grid;
@@ -479,29 +681,29 @@ function dashboardLayout(title, content) {
       .stat {
         border-radius: 20px;
         padding: 18px;
-        position: relative;
         overflow: hidden;
         border: 1px solid rgba(255,255,255,.08);
-        box-shadow: 0 12px 28px rgba(0,0,0,.22);
+        box-shadow: 0 12px 28px rgba(0,0,0,.16);
         transform: translateY(0);
         transition: transform .22s ease, box-shadow .22s ease;
       }
 
       .stat:hover {
         transform: translateY(-4px);
-        box-shadow: 0 20px 42px rgba(0,0,0,.28);
+        box-shadow: 0 20px 42px rgba(0,0,0,.18);
       }
 
       .stat h3 {
         margin: 0;
         font-size: 14px;
-        color: rgba(255,255,255,.86);
+        color: rgba(255,255,255,.92);
       }
 
       .stat .num {
         margin-top: 10px;
         font-size: 30px;
         font-weight: 800;
+        color: white;
       }
 
       .stat.blue { background: linear-gradient(135deg, rgba(59,130,246,.92), rgba(6,182,212,.82)); }
@@ -519,23 +721,23 @@ function dashboardLayout(title, content) {
       th, td {
         text-align: left;
         padding: 14px 12px;
-        border-bottom: 1px solid rgba(255,255,255,.08);
+        border-bottom: 1px solid var(--line);
         vertical-align: top;
       }
 
       th {
-        color: #e2e8f0;
+        color: var(--muted);
         font-size: 13px;
         text-transform: uppercase;
         letter-spacing: .04em;
       }
 
-      tr {
-        transition: background .18s ease, transform .18s ease;
-      }
-
       tbody tr:hover {
         background: rgba(255,255,255,.04);
+      }
+
+      html[data-theme="light"] tbody tr:hover {
+        background: rgba(15,23,42,.03);
       }
 
       .btn, button {
@@ -550,7 +752,8 @@ function dashboardLayout(title, content) {
         cursor: none !important;
         font-weight: 700;
         transition: transform .18s ease, opacity .18s ease, box-shadow .18s ease;
-        box-shadow: 0 10px 24px rgba(0,0,0,.18);
+        box-shadow: 0 10px 24px rgba(0,0,0,.12);
+        color: inherit;
       }
 
       .btn:hover, button:hover {
@@ -579,9 +782,9 @@ function dashboardLayout(title, content) {
         width: 100%;
         padding: 13px 14px;
         border-radius: 14px;
-        border: 1px solid rgba(255,255,255,.10);
-        background: rgba(2,6,23,.55);
-        color: white;
+        border: 1px solid var(--line);
+        background: var(--input);
+        color: var(--text);
         outline: none;
         transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
       }
@@ -589,7 +792,6 @@ function dashboardLayout(title, content) {
       input:focus {
         border-color: rgba(59,130,246,.8);
         box-shadow: 0 0 0 4px rgba(59,130,246,.16);
-        background: rgba(2,6,23,.72);
       }
 
       input[type="file"] {
@@ -598,8 +800,8 @@ function dashboardLayout(title, content) {
 
       .pill {
         background: rgba(255,255,255,.06);
-        border: 1px solid rgba(255,255,255,.08);
-        color: #dbeafe;
+        border: 1px solid var(--line);
+        color: var(--text);
         border-radius: 999px;
         padding: 7px 12px;
         display: inline-block;
@@ -607,11 +809,15 @@ function dashboardLayout(title, content) {
         margin: 0 8px 8px 0;
       }
 
+      html[data-theme="light"] .pill {
+        background: rgba(255,255,255,.85);
+      }
+
       .flash {
         padding: 14px 16px;
         border-radius: 16px;
         margin-bottom: 18px;
-        box-shadow: 0 12px 26px rgba(0,0,0,.20);
+        box-shadow: 0 12px 26px rgba(0,0,0,.14);
         border: 1px solid rgba(255,255,255,.08);
       }
 
@@ -628,7 +834,7 @@ function dashboardLayout(title, content) {
       .upload-box {
         padding: 16px;
         border-radius: 18px;
-        border: 1px dashed rgba(255,255,255,.16);
+        border: 1px dashed var(--line);
         background: linear-gradient(135deg, rgba(59,130,246,.08), rgba(236,72,153,.06));
       }
 
@@ -637,20 +843,144 @@ function dashboardLayout(title, content) {
         padding:8px 12px;
         border-radius:999px;
         background: rgba(255,255,255,.08);
-        border:1px solid rgba(255,255,255,.08);
+        border:1px solid var(--line);
         font-size:12px;
         margin-bottom:12px;
       }
 
+      html[data-theme="light"] .tagline {
+        background: rgba(255,255,255,.9);
+      }
+
+      .theme-btn {
+        min-width: 128px;
+      }
+
+      .pdf-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 9998;
+      }
+
+      .pdf-modal.hidden {
+        display: none;
+      }
+
+      .pdf-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.45);
+        backdrop-filter: blur(10px);
+      }
+
+      .pdf-dialog {
+        position: relative;
+        z-index: 2;
+        width: min(1100px, calc(100vw - 32px));
+        height: min(86vh, 860px);
+        margin: 5vh auto;
+        border-radius: 24px;
+        background: var(--card-strong);
+        border: 1px solid var(--line);
+        box-shadow: 0 30px 80px rgba(0,0,0,.28);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .pdf-header {
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        background: var(--backdrop);
+        backdrop-filter: blur(14px);
+      }
+
+      .pdf-title {
+        font-weight: 800;
+        font-size: 18px;
+      }
+
+      .pdf-frame-wrap {
+        flex: 1;
+        background: rgba(15,23,42,.08);
+      }
+
+      #pdf-frame {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: white;
+      }
+
+      .page-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+      }
+
+      .page-loader.hidden {
+        display: none;
+      }
+
+      .page-loader-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.55);
+        backdrop-filter: blur(12px);
+      }
+
+      .page-loader-box {
+        position: relative;
+        z-index: 2;
+        width: min(520px, calc(100vw - 32px));
+        margin: 24vh auto 0;
+        padding: 26px;
+        border-radius: 24px;
+        background: var(--card-strong);
+        border: 1px solid var(--line);
+        box-shadow: 0 30px 80px rgba(0,0,0,.28);
+        text-align: center;
+      }
+
+      .page-loader-box h3 {
+        margin: 16px 0 8px;
+        font-size: 24px;
+      }
+
+      .page-loader-box p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .loader-train-track {
+        width: 100%;
+        height: 58px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(59,130,246,.12), rgba(236,72,153,.10), rgba(34,197,94,.10));
+        overflow: hidden;
+        position: relative;
+      }
+
+      .loader-train {
+        position: absolute;
+        top: 10px;
+        left: -60px;
+        font-size: 34px;
+        animation: trainRun 1.45s linear infinite;
+      }
+
+      @keyframes trainRun {
+        0% { transform: translateX(0); }
+        100% { transform: translateX(560px); }
+      }
+
       @keyframes fadeUp {
-        from {
-          opacity: 0;
-          transform: translateY(10px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
       }
 
       @media (max-width: 980px) {
@@ -685,18 +1015,30 @@ function dashboardLayout(title, content) {
           width: 100%;
         }
 
-        table {
-          font-size: 14px;
+        .topbar-inner {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .pdf-dialog {
+          width: calc(100vw - 16px);
+          height: 88vh;
+          margin: 3vh auto;
         }
       }
     </style>
   </head>
   <body>
-    <div class="topbar">${escapeHtml(title)}</div>
+    <div class="topbar">
+      <div class="topbar-inner">
+        <div>${escapeHtml(title)}</div>
+        <button class="btn btn-dark theme-btn" type="button" data-theme-toggle>🌓 Change Theme</button>
+      </div>
+    </div>
     <div class="wrap">
       ${content}
     </div>
-    ${soundAndCursorScript()}
+    ${themeAndInteractionScript()}
   </body>
   </html>
   `;
@@ -706,7 +1048,6 @@ function dashboardLayout(title, content) {
 bot.onText(/\/start/, async (msg) => {
   try {
     const chatId = msg.chat.id;
-
     scheduleDelete(chatId, msg.message_id);
 
     const tickets = await getValidTickets();
@@ -939,7 +1280,7 @@ app.get("/", async (req, res) => {
 
     <div class="card">
       <h2 class="section-title">🚆 Available Tickets</h2>
-      <p class="subtle mb16">Choose a date below to view or download the ticket directly from your browser.</p>
+      <p class="subtle mb16">Choose a date below to preview or download the ticket directly from your browser.</p>
       ${
         tickets.length
           ? `
@@ -958,7 +1299,7 @@ app.get("/", async (req, res) => {
                       <td>${escapeHtml(t.date)}</td>
                       <td>
                         <div class="flex">
-                          <a class="btn btn-secondary" href="/tickets/${encodeURIComponent(t.date)}/view" target="_blank">👁 View</a>
+                          <button class="btn btn-secondary" type="button" data-view-pdf="/tickets/${encodeURIComponent(t.date)}/inline">👁 View</button>
                           <a class="btn btn-primary" href="/tickets/${encodeURIComponent(t.date)}/download">⬇ Download</a>
                         </div>
                       </td>
@@ -998,7 +1339,7 @@ app.get("/tickets", async (req, res) => {
   return res.redirect("/");
 });
 
-app.get("/tickets/:date/view", async (req, res) => {
+app.get("/tickets/:date/inline", async (req, res) => {
   try {
     const date = req.params.date;
     const ticket = await ticketsCollection.findOne({ date });
@@ -1006,11 +1347,11 @@ app.get("/tickets/:date/view", async (req, res) => {
     if (!ticket) return res.status(404).send("Ticket not found");
 
     const fileLink = await bot.getFileLink(ticket.file_id);
-    await logDownload({ id: null, username: "web-view", first_name: "Web User" }, date, "web");
+    await logDownload({ id: null, username: "web-view", first_name: "Web User" }, date, "web-view");
 
     return res.redirect(fileLink);
   } catch (err) {
-    console.error("view route error:", err);
+    console.error("inline route error:", err);
     return res.status(500).send("Failed to open ticket");
   }
 });
@@ -1023,7 +1364,7 @@ app.get("/tickets/:date/download", async (req, res) => {
     if (!ticket) return res.status(404).send("Ticket not found");
 
     const fileLink = await bot.getFileLink(ticket.file_id);
-    await logDownload({ id: null, username: "web-download", first_name: "Web User" }, date, "web");
+    await logDownload({ id: null, username: "web-download", first_name: "Web User" }, date, "web-download");
 
     return res.redirect(fileLink);
   } catch (err) {
@@ -1047,7 +1388,7 @@ app.get("/admin/login", (req, res) => {
 
     <div class="card" style="max-width:520px;margin:0 auto;">
       <h2 class="section-title">🔐 Admin Login</h2>
-      <form method="POST" action="/admin/login">
+      <form method="POST" action="/admin/login" data-login-form>
         <div class="mb12">
           <label class="small muted">Username</label>
           <input type="text" name="username" required />
@@ -1091,7 +1432,7 @@ app.post("/admin/login", (req, res) => {
       <div class="flash" style="background:linear-gradient(135deg, rgba(127,29,29,.95), rgba(239,68,68,.85)); color:#fee2e2;">
         Invalid username or password.
       </div>
-      <form method="POST" action="/admin/login">
+      <form method="POST" action="/admin/login" data-login-form>
         <div class="mb12">
           <label class="small muted">Username</label>
           <input type="text" name="username" required />
@@ -1187,8 +1528,8 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
         <div class="mb8"><span class="pill">Telegram upload supported</span></div>
         <div class="mb8"><span class="pill">Same date = replace old ticket</span></div>
         <div class="mb8"><span class="pill">Midnight cleanup in IST</span></div>
-        <div class="mb8"><span class="pill">Browser view + download</span></div>
-        <div class="mb8"><span class="pill">Telegram auto-delete</span></div>
+        <div class="mb8"><span class="pill">Inline PDF preview modal</span></div>
+        <div class="mb8"><span class="pill">Light / Dark theme</span></div>
       </div>
 
       <div class="card">
@@ -1227,7 +1568,7 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
                         <td>${t.updated_at ? escapeHtml(formatDateTimeIST(t.updated_at)) : "-"}</td>
                         <td>
                           <div class="flex">
-                            <a class="btn btn-secondary" target="_blank" href="/tickets/${encodeURIComponent(t.date)}/view">👁 View</a>
+                            <button class="btn btn-secondary" type="button" data-view-pdf="/tickets/${encodeURIComponent(t.date)}/inline">👁 View</button>
                             <a class="btn btn-primary" href="/tickets/${encodeURIComponent(t.date)}/download">⬇ Download</a>
                             <form method="POST" action="/admin/delete/${encodeURIComponent(t.date)}" onsubmit="return confirm('Delete ticket for ${escapeHtml(t.date)}?')">
                               <button class="btn btn-danger" type="submit">🗑 Delete</button>
