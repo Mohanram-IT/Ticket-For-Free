@@ -237,6 +237,103 @@ function renderFlash(flash) {
   `;
 }
 
+function soundAndCursorScript() {
+  return `
+    <div id="train-cursor" aria-hidden="true">🚂</div>
+    <script>
+      (function () {
+        const cursor = document.getElementById("train-cursor");
+        let mouseX = window.innerWidth / 2;
+        let mouseY = window.innerHeight / 2;
+        let currentX = mouseX;
+        let currentY = mouseY;
+
+        function animateCursor() {
+          currentX += (mouseX - currentX) * 0.18;
+          currentY += (mouseY - currentY) * 0.18;
+          if (cursor) {
+            cursor.style.transform = "translate(" + currentX + "px, " + currentY + "px)";
+          }
+          requestAnimationFrame(animateCursor);
+        }
+
+        document.addEventListener("mousemove", function (e) {
+          mouseX = e.clientX + 6;
+          mouseY = e.clientY + 6;
+        });
+
+        document.addEventListener("mouseleave", function () {
+          if (cursor) cursor.style.opacity = "0";
+        });
+
+        document.addEventListener("mouseenter", function () {
+          if (cursor) cursor.style.opacity = "1";
+        });
+
+        function playTrainHorn() {
+          try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            const ctx = new AudioCtx();
+            const now = ctx.currentTime;
+
+            const master = ctx.createGain();
+            master.gain.setValueAtTime(0.0001, now);
+            master.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
+            master.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+            master.connect(ctx.destination);
+
+            const osc1 = ctx.createOscillator();
+            const osc2 = ctx.createOscillator();
+            const gain1 = ctx.createGain();
+            const gain2 = ctx.createGain();
+
+            osc1.type = "sawtooth";
+            osc2.type = "square";
+
+            osc1.frequency.setValueAtTime(220, now);
+            osc1.frequency.exponentialRampToValueAtTime(180, now + 0.55);
+
+            osc2.frequency.setValueAtTime(330, now);
+            osc2.frequency.exponentialRampToValueAtTime(260, now + 0.55);
+
+            gain1.gain.value = 0.55;
+            gain2.gain.value = 0.25;
+
+            osc1.connect(gain1);
+            osc2.connect(gain2);
+            gain1.connect(master);
+            gain2.connect(master);
+
+            osc1.start(now);
+            osc2.start(now);
+            osc1.stop(now + 0.58);
+            osc2.stop(now + 0.58);
+
+            setTimeout(() => {
+              try { ctx.close(); } catch (_) {}
+            }, 800);
+          } catch (_) {}
+        }
+
+        document.addEventListener("click", function (e) {
+          const clickable = e.target.closest("a, button");
+          if (!clickable) return;
+          playTrainHorn();
+
+          if (cursor) {
+            cursor.classList.remove("cursor-pop");
+            void cursor.offsetWidth;
+            cursor.classList.add("cursor-pop");
+          }
+        });
+
+        animateCursor();
+      })();
+    </script>
+  `;
+}
+
 function dashboardLayout(title, content) {
   return `
   <!DOCTYPE html>
@@ -249,21 +346,16 @@ function dashboardLayout(title, content) {
       :root{
         --bg1:#0f172a;
         --bg2:#111827;
-        --bg3:#1e293b;
-        --line:rgba(255,255,255,.10);
         --text:#f8fafc;
         --muted:#cbd5e1;
         --soft:#94a3b8;
-        --green:#22c55e;
-        --blue:#3b82f6;
-        --red:#ef4444;
-        --amber:#f59e0b;
-        --purple:#8b5cf6;
-        --cyan:#06b6d4;
-        --pink:#ec4899;
       }
 
       * { box-sizing:border-box; }
+
+      html, body {
+        cursor: none;
+      }
 
       body {
         margin: 0;
@@ -275,6 +367,32 @@ function dashboardLayout(title, content) {
           radial-gradient(circle at bottom left, rgba(34,197,94,.15), transparent 24%),
           linear-gradient(135deg, #020617 0%, #0f172a 38%, #111827 100%);
         min-height: 100vh;
+      }
+
+      a, button, input, label, form {
+        cursor: none !important;
+      }
+
+      #train-cursor {
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 99999;
+        pointer-events: none;
+        font-size: 24px;
+        transform: translate(-100px, -100px);
+        filter: drop-shadow(0 8px 14px rgba(0,0,0,.35));
+        transition: opacity .18s ease;
+      }
+
+      .cursor-pop {
+        animation: cursorBounce .28s ease;
+      }
+
+      @keyframes cursorBounce {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.28); }
+        100% { transform: scale(1); }
       }
 
       .topbar {
@@ -429,14 +547,14 @@ function dashboardLayout(title, content) {
         border: none;
         border-radius: 12px;
         text-decoration: none;
-        cursor: pointer;
+        cursor: none !important;
         font-weight: 700;
         transition: transform .18s ease, opacity .18s ease, box-shadow .18s ease;
         box-shadow: 0 10px 24px rgba(0,0,0,.18);
       }
 
       .btn:hover, button:hover {
-        transform: translateY(-2px);
+        transform: translateY(-2px) scale(1.01);
         opacity: .96;
       }
 
@@ -486,6 +604,7 @@ function dashboardLayout(title, content) {
         padding: 7px 12px;
         display: inline-block;
         font-size: 12px;
+        margin: 0 8px 8px 0;
       }
 
       .flash {
@@ -541,6 +660,14 @@ function dashboardLayout(title, content) {
       }
 
       @media (max-width: 768px) {
+        html, body, a, button, input, label, form {
+          cursor: auto !important;
+        }
+
+        #train-cursor {
+          display: none;
+        }
+
         .wrap {
           padding: 16px;
         }
@@ -569,6 +696,7 @@ function dashboardLayout(title, content) {
     <div class="wrap">
       ${content}
     </div>
+    ${soundAndCursorScript()}
   </body>
   </html>
   `;
@@ -928,7 +1056,10 @@ app.get("/admin/login", (req, res) => {
           <label class="small muted">Password</label>
           <input type="password" name="password" required />
         </div>
-        <button class="btn btn-primary" type="submit">Login</button>
+        <div class="flex">
+          <button class="btn btn-primary" type="submit">Login</button>
+          <a class="btn btn-dark" href="/">← Back to Public Page</a>
+        </div>
       </form>
     </div>
   `
@@ -969,7 +1100,10 @@ app.post("/admin/login", (req, res) => {
           <label class="small muted">Password</label>
           <input type="password" name="password" required />
         </div>
-        <button class="btn btn-primary" type="submit">Login</button>
+        <div class="flex">
+          <button class="btn btn-primary" type="submit">Login</button>
+          <a class="btn btn-dark" href="/">← Back to Public Page</a>
+        </div>
       </form>
     </div>
   `
