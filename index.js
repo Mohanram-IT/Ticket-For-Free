@@ -51,7 +51,7 @@ const pendingAdminUploads = new Map();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10 MB
+    fileSize: 10 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
     const isPdf =
@@ -191,8 +191,8 @@ async function cleanupExpiredTickets() {
   console.log(`Cleanup done 🧹 Deleted ${result.deletedCount} expired ticket(s)`);
 }
 
-async function scheduleDeleteMessage(chatId, messageId, delayMs = MENU_DELETE_MS) {
-  if (!messageId || delayMs <= 0) return;
+function scheduleDelete(chatId, messageId, delayMs = MENU_DELETE_MS) {
+  if (!chatId || !messageId || delayMs <= 0) return;
 
   setTimeout(async () => {
     try {
@@ -224,11 +224,14 @@ function setFlashMessage(req, type, text) {
 
 function renderFlash(flash) {
   if (!flash) return "";
-  const bg = flash.type === "error" ? "#7f1d1d" : "#14532d";
-  const color = flash.type === "error" ? "#fecaca" : "#bbf7d0";
+  const bg =
+    flash.type === "error"
+      ? "linear-gradient(135deg, rgba(127,29,29,.95), rgba(239,68,68,.85))"
+      : "linear-gradient(135deg, rgba(20,83,45,.95), rgba(34,197,94,.85))";
+  const color = flash.type === "error" ? "#fee2e2" : "#dcfce7";
 
   return `
-    <div style="background:${bg}; color:${color}; padding:12px 14px; border-radius:10px; margin-bottom:16px;">
+    <div class="flash" style="background:${bg}; color:${color};">
       ${escapeHtml(flash.text)}
     </div>
   `;
@@ -243,109 +246,320 @@ function dashboardLayout(title, content) {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(title)}</title>
     <style>
+      :root{
+        --bg1:#0f172a;
+        --bg2:#111827;
+        --bg3:#1e293b;
+        --line:rgba(255,255,255,.10);
+        --text:#f8fafc;
+        --muted:#cbd5e1;
+        --soft:#94a3b8;
+        --green:#22c55e;
+        --blue:#3b82f6;
+        --red:#ef4444;
+        --amber:#f59e0b;
+        --purple:#8b5cf6;
+        --cyan:#06b6d4;
+        --pink:#ec4899;
+      }
+
+      * { box-sizing:border-box; }
+
       body {
         margin: 0;
         font-family: Arial, sans-serif;
-        background: #0f172a;
-        color: #fff;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(59,130,246,.20), transparent 28%),
+          radial-gradient(circle at top right, rgba(236,72,153,.18), transparent 24%),
+          radial-gradient(circle at bottom left, rgba(34,197,94,.15), transparent 24%),
+          linear-gradient(135deg, #020617 0%, #0f172a 38%, #111827 100%);
+        min-height: 100vh;
       }
+
       .topbar {
-        background: #111827;
+        position: sticky;
+        top: 0;
+        z-index: 10;
         padding: 18px 24px;
         font-size: 22px;
-        font-weight: 700;
+        font-weight: 800;
+        backdrop-filter: blur(14px);
+        background: rgba(15, 23, 42, 0.72);
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        box-shadow: 0 8px 24px rgba(0,0,0,.22);
       }
+
       .wrap {
-        max-width: 1200px;
+        max-width: 1240px;
         margin: 0 auto;
-        padding: 20px;
+        padding: 24px;
       }
+
+      .hero {
+        margin-bottom: 22px;
+        padding: 26px;
+        border-radius: 24px;
+        background:
+          linear-gradient(135deg, rgba(59,130,246,.18), rgba(139,92,246,.16), rgba(236,72,153,.15)),
+          rgba(255,255,255,.04);
+        border: 1px solid rgba(255,255,255,.08);
+        backdrop-filter: blur(12px);
+        box-shadow: 0 20px 60px rgba(0,0,0,.25);
+        animation: fadeUp .55s ease;
+      }
+
+      .hero h1 {
+        margin: 0 0 10px 0;
+        font-size: 34px;
+        line-height: 1.1;
+      }
+
+      .hero p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+      }
+
       .card {
-        background: #1e293b;
-        border-radius: 12px;
-        padding: 18px;
+        background: rgba(255,255,255,.055);
+        border: 1px solid rgba(255,255,255,.08);
+        border-radius: 22px;
+        padding: 20px;
         margin-bottom: 20px;
+        backdrop-filter: blur(12px);
+        box-shadow: 0 14px 38px rgba(0,0,0,.20);
+        animation: fadeUp .55s ease;
       }
-      .muted {
-        color: #94a3b8;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      th, td {
-        text-align: left;
-        padding: 12px 10px;
-        border-bottom: 1px solid #334155;
-        vertical-align: top;
-      }
-      th {
-        color: #cbd5e1;
-      }
-      .btn, button {
-        display: inline-block;
-        padding: 8px 12px;
-        border: none;
-        border-radius: 8px;
-        text-decoration: none;
-        cursor: pointer;
-        font-weight: 600;
-      }
-      .btn-primary { background: #22c55e; color: #08130a; }
-      .btn-danger { background: #ef4444; color: white; }
-      .btn-secondary { background: #3b82f6; color: white; }
-      .btn-dark { background: #0f172a; color: white; border: 1px solid #334155; }
-      .btn-warning { background: #f59e0b; color: #111827; }
-      input {
-        width: 100%;
-        padding: 12px;
-        border-radius: 8px;
-        border: 1px solid #334155;
-        background: #0f172a;
-        color: white;
-        box-sizing: border-box;
-      }
-      input[type="file"] {
-        padding: 10px;
-      }
-      .row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 16px;
-      }
-      .row-3 {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        gap: 16px;
-      }
-      .small {
-        font-size: 13px;
-      }
+
+      .muted { color: var(--soft); }
+      .small { font-size: 13px; }
       .mb8 { margin-bottom: 8px; }
       .mb12 { margin-bottom: 12px; }
       .mb16 { margin-bottom: 16px; }
+      .mb20 { margin-bottom: 20px; }
+
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+
+      .row-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 18px;
+      }
+
+      .stats {
+        display:grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap:16px;
+        margin-bottom:20px;
+      }
+
+      .stat {
+        border-radius: 20px;
+        padding: 18px;
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,.08);
+        box-shadow: 0 12px 28px rgba(0,0,0,.22);
+        transform: translateY(0);
+        transition: transform .22s ease, box-shadow .22s ease;
+      }
+
+      .stat:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 20px 42px rgba(0,0,0,.28);
+      }
+
+      .stat h3 {
+        margin: 0;
+        font-size: 14px;
+        color: rgba(255,255,255,.86);
+      }
+
+      .stat .num {
+        margin-top: 10px;
+        font-size: 30px;
+        font-weight: 800;
+      }
+
+      .stat.blue { background: linear-gradient(135deg, rgba(59,130,246,.92), rgba(6,182,212,.82)); }
+      .stat.green { background: linear-gradient(135deg, rgba(34,197,94,.92), rgba(16,185,129,.82)); }
+      .stat.purple { background: linear-gradient(135deg, rgba(139,92,246,.92), rgba(236,72,153,.78)); }
+      .stat.amber { background: linear-gradient(135deg, rgba(245,158,11,.92), rgba(251,191,36,.78)); }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        overflow: hidden;
+        border-radius: 16px;
+      }
+
+      th, td {
+        text-align: left;
+        padding: 14px 12px;
+        border-bottom: 1px solid rgba(255,255,255,.08);
+        vertical-align: top;
+      }
+
+      th {
+        color: #e2e8f0;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+      }
+
+      tr {
+        transition: background .18s ease, transform .18s ease;
+      }
+
+      tbody tr:hover {
+        background: rgba(255,255,255,.04);
+      }
+
+      .btn, button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border: none;
+        border-radius: 12px;
+        text-decoration: none;
+        cursor: pointer;
+        font-weight: 700;
+        transition: transform .18s ease, opacity .18s ease, box-shadow .18s ease;
+        box-shadow: 0 10px 24px rgba(0,0,0,.18);
+      }
+
+      .btn:hover, button:hover {
+        transform: translateY(-2px);
+        opacity: .96;
+      }
+
+      .btn-primary { background: linear-gradient(135deg, #22c55e, #16a34a); color: #04120a; }
+      .btn-danger { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
+      .btn-secondary { background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; }
+      .btn-dark {
+        background: linear-gradient(135deg, rgba(15,23,42,.95), rgba(30,41,59,.95));
+        color: white;
+        border: 1px solid rgba(255,255,255,.08);
+      }
+      .btn-warning { background: linear-gradient(135deg, #f59e0b, #d97706); color: #111827; }
+
       .flex {
         display: flex;
         gap: 10px;
         flex-wrap: wrap;
         align-items: center;
       }
+
+      input {
+        width: 100%;
+        padding: 13px 14px;
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,.10);
+        background: rgba(2,6,23,.55);
+        color: white;
+        outline: none;
+        transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+      }
+
+      input:focus {
+        border-color: rgba(59,130,246,.8);
+        box-shadow: 0 0 0 4px rgba(59,130,246,.16);
+        background: rgba(2,6,23,.72);
+      }
+
+      input[type="file"] {
+        padding: 10px;
+      }
+
       .pill {
-        background: #0f172a;
-        border: 1px solid #334155;
-        color: #cbd5e1;
+        background: rgba(255,255,255,.06);
+        border: 1px solid rgba(255,255,255,.08);
+        color: #dbeafe;
         border-radius: 999px;
-        padding: 6px 10px;
+        padding: 7px 12px;
         display: inline-block;
         font-size: 12px;
       }
-      @media (max-width: 768px) {
-        .row, .row-3 {
+
+      .flash {
+        padding: 14px 16px;
+        border-radius: 16px;
+        margin-bottom: 18px;
+        box-shadow: 0 12px 26px rgba(0,0,0,.20);
+        border: 1px solid rgba(255,255,255,.08);
+      }
+
+      .section-title {
+        margin: 0 0 14px 0;
+        font-size: 22px;
+      }
+
+      .subtle {
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .upload-box {
+        padding: 16px;
+        border-radius: 18px;
+        border: 1px dashed rgba(255,255,255,.16);
+        background: linear-gradient(135deg, rgba(59,130,246,.08), rgba(236,72,153,.06));
+      }
+
+      .tagline {
+        display:inline-block;
+        padding:8px 12px;
+        border-radius:999px;
+        background: rgba(255,255,255,.08);
+        border:1px solid rgba(255,255,255,.08);
+        font-size:12px;
+        margin-bottom:12px;
+      }
+
+      @keyframes fadeUp {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 980px) {
+        .row, .row-3, .stats {
           grid-template-columns: 1fr;
         }
+      }
+
+      @media (max-width: 768px) {
+        .wrap {
+          padding: 16px;
+        }
+
+        .hero h1 {
+          font-size: 28px;
+        }
+
         .flex {
           flex-direction: column;
-          align-items: flex-start;
+          align-items: stretch;
+        }
+
+        .btn, button {
+          width: 100%;
+        }
+
+        table {
+          font-size: 14px;
         }
       }
     </style>
@@ -364,11 +578,14 @@ function dashboardLayout(title, content) {
 bot.onText(/\/start/, async (msg) => {
   try {
     const chatId = msg.chat.id;
+
+    scheduleDelete(chatId, msg.message_id);
+
     const tickets = await getValidTickets();
 
     if (!tickets.length) {
       const m = await bot.sendMessage(chatId, "❌ No valid tickets available right now.");
-      await scheduleDeleteMessage(chatId, m.message_id);
+      scheduleDelete(chatId, m.message_id);
       return;
     }
 
@@ -378,7 +595,7 @@ bot.onText(/\/start/, async (msg) => {
       reply_markup: { inline_keyboard: buttons },
     });
 
-    await scheduleDeleteMessage(chatId, sent.message_id);
+    scheduleDelete(chatId, sent.message_id);
   } catch (err) {
     console.error("/start error:", err);
   }
@@ -386,6 +603,8 @@ bot.onText(/\/start/, async (msg) => {
 
 bot.onText(/\/admin/, async (msg) => {
   if (!adminOnly(msg)) return;
+
+  scheduleDelete(msg.chat.id, msg.message_id);
 
   const text = [
     "🛠 Admin commands",
@@ -396,13 +615,18 @@ bot.onText(/\/admin/, async (msg) => {
     "4. Send /cancel to cancel pending upload",
   ].join("\n");
 
-  await bot.sendMessage(msg.chat.id, text);
+  const reply = await bot.sendMessage(msg.chat.id, text);
+  scheduleDelete(msg.chat.id, reply.message_id);
 });
 
 bot.onText(/\/cancel/, async (msg) => {
   if (!adminOnly(msg)) return;
   pendingAdminUploads.delete(msg.chat.id);
-  await bot.sendMessage(msg.chat.id, "✅ Pending upload cancelled.");
+
+  scheduleDelete(msg.chat.id, msg.message_id);
+
+  const reply = await bot.sendMessage(msg.chat.id, "✅ Pending upload cancelled.");
+  scheduleDelete(msg.chat.id, reply.message_id);
 });
 
 bot.on("document", async (msg) => {
@@ -413,9 +637,12 @@ bot.on("document", async (msg) => {
     const chatId = msg.chat.id;
     if (!doc) return;
 
+    scheduleDelete(chatId, msg.message_id);
+
     const mimeType = doc.mime_type || "";
     if (mimeType !== "application/pdf" && !String(doc.file_name || "").toLowerCase().endsWith(".pdf")) {
-      await bot.sendMessage(chatId, "❌ Please send only PDF files.");
+      const reply = await bot.sendMessage(chatId, "❌ Please send only PDF files.");
+      scheduleDelete(chatId, reply.message_id);
       return;
     }
 
@@ -437,22 +664,26 @@ bot.on("document", async (msg) => {
         ...payload,
       });
 
-      await bot.sendMessage(
+      const reply = await bot.sendMessage(
         chatId,
         `✅ Ticket saved for ${autoDate}\n📄 File: ${payload.file_name}\n♻️ If this date already existed, it was replaced.`
       );
+      scheduleDelete(chatId, reply.message_id);
       return;
     }
 
     pendingAdminUploads.set(chatId, payload);
-    await bot.sendMessage(
+
+    const reply = await bot.sendMessage(
       chatId,
       "📅 Date not found in filename.\nPlease send the ticket date in this format:\nYYYY-MM-DD\n\nExample: 2026-04-10"
     );
+    scheduleDelete(chatId, reply.message_id);
   } catch (err) {
     console.error("document upload error:", err);
     try {
-      await bot.sendMessage(msg.chat.id, "❌ Failed to process the uploaded PDF.");
+      const reply = await bot.sendMessage(msg.chat.id, "❌ Failed to process the uploaded PDF.");
+      scheduleDelete(msg.chat.id, reply.message_id);
     } catch (_) {}
   }
 });
@@ -467,9 +698,12 @@ bot.on("message", async (msg) => {
     const pending = pendingAdminUploads.get(chatId);
     if (!pending) return;
 
+    scheduleDelete(chatId, msg.message_id);
+
     const date = extractDate(msg.text.trim());
     if (!date) {
-      await bot.sendMessage(chatId, "❌ Invalid date format. Please send as YYYY-MM-DD");
+      const reply = await bot.sendMessage(chatId, "❌ Invalid date format. Please send as YYYY-MM-DD");
+      scheduleDelete(chatId, reply.message_id);
       return;
     }
 
@@ -480,10 +714,11 @@ bot.on("message", async (msg) => {
 
     pendingAdminUploads.delete(chatId);
 
-    await bot.sendMessage(
+    const reply = await bot.sendMessage(
       chatId,
       `✅ Ticket saved for ${date}\n📄 File: ${pending.file_name}\n♻️ If this date already existed, it was replaced.`
     );
+    scheduleDelete(chatId, reply.message_id);
   } catch (err) {
     console.error("admin date reply error:", err);
   }
@@ -509,15 +744,12 @@ bot.on("callback_query", async (query) => {
 
     await bot.answerCallbackQuery(query.id, { text: `Sending ticket for ${date}` });
 
-    if (ticket.file_id) {
-      await bot.sendDocument(chatId, ticket.file_id, {}, {
-        filename: ticket.file_name || `${date}.pdf`,
-        contentType: ticket.mime_type || "application/pdf",
-      });
-    } else {
-      const fileLink = await bot.getFileLink(ticket.file_id);
-      await bot.sendMessage(chatId, `📄 Open your ticket: ${fileLink}`);
-    }
+    const sentDoc = await bot.sendDocument(chatId, ticket.file_id, {}, {
+      filename: ticket.file_name || `${date}.pdf`,
+      contentType: ticket.mime_type || "application/pdf",
+    });
+
+    scheduleDelete(chatId, sentDoc.message_id);
 
     await logDownload(query.from, date, "telegram");
 
@@ -549,47 +781,87 @@ app.post(WEBHOOK_PATH, async (req, res) => {
 app.get("/", async (req, res) => {
   const tickets = await getValidTickets();
 
-  const html = dashboardLayout(APP_NAME, `
+  const html = dashboardLayout(
+    APP_NAME,
+    `
+    <div class="hero">
+      <div class="tagline">Fast • Clean • Browser + Telegram Access</div>
+      <h1>Download your train tickets beautifully</h1>
+      <p>Use the website for instant ticket access or use the Telegram bot for one-tap ticket delivery. Everything stays synced.</p>
+    </div>
+
+    <div class="stats">
+      <div class="stat blue">
+        <h3>Valid Tickets</h3>
+        <div class="num">${tickets.length}</div>
+      </div>
+      <div class="stat green">
+        <h3>Today (IST)</h3>
+        <div class="num" style="font-size:22px;">${escapeHtml(todayInIST())}</div>
+      </div>
+      <div class="stat purple">
+        <h3>Access Mode</h3>
+        <div class="num" style="font-size:22px;">Web + Bot</div>
+      </div>
+      <div class="stat amber">
+        <h3>Status</h3>
+        <div class="num" style="font-size:22px;">Live</div>
+      </div>
+    </div>
+
     <div class="card">
-      <h2 class="mb8">🚆 Available Tickets</h2>
-      <p class="muted mb16">You can download tickets from the browser here, or use the Telegram bot.</p>
+      <h2 class="section-title">🚆 Available Tickets</h2>
+      <p class="subtle mb16">Choose a date below to view or download the ticket directly from your browser.</p>
       ${
         tickets.length
           ? `
             <table>
-              <tr>
-                <th>Date</th>
-                <th>Actions</th>
-              </tr>
-              ${tickets
-                .map(
-                  (t) => `
-                  <tr>
-                    <td>${escapeHtml(t.date)}</td>
-                    <td class="flex">
-                      <a class="btn btn-secondary" href="/tickets/${encodeURIComponent(t.date)}/view" target="_blank">View</a>
-                      <a class="btn btn-primary" href="/tickets/${encodeURIComponent(t.date)}/download">Download</a>
-                    </td>
-                  </tr>
-                `
-                )
-                .join("")}
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tickets
+                  .map(
+                    (t) => `
+                    <tr>
+                      <td>${escapeHtml(t.date)}</td>
+                      <td>
+                        <div class="flex">
+                          <a class="btn btn-secondary" href="/tickets/${encodeURIComponent(t.date)}/view" target="_blank">👁 View</a>
+                          <a class="btn btn-primary" href="/tickets/${encodeURIComponent(t.date)}/download">⬇ Download</a>
+                        </div>
+                      </td>
+                    </tr>
+                  `
+                  )
+                  .join("")}
+              </tbody>
             </table>
           `
           : `<p>❌ No valid tickets available.</p>`
       }
     </div>
 
-    <div class="card">
-      <h2 class="mb8">🤖 Telegram Bot</h2>
-      <p class="muted">Open your Telegram bot and send <b>/start</b> to receive tickets inside Telegram.</p>
-    </div>
+    <div class="row">
+      <div class="card">
+        <h2 class="section-title">🤖 Telegram Bot</h2>
+        <p class="subtle mb16">Open your Telegram bot and send <b>/start</b> to receive tickets inside Telegram.</p>
+        <div class="pill">Interactive date buttons</div>
+        <div class="pill">Automatic cleanup</div>
+        <div class="pill">Fast ticket sending</div>
+      </div>
 
-    <div class="card">
-      <h2 class="mb8">🔐 Admin</h2>
-      <a class="btn btn-dark" href="/admin/login">Open Admin Login</a>
+      <div class="card">
+        <h2 class="section-title">🔐 Admin</h2>
+        <p class="subtle mb16">Admins can upload tickets from Telegram or the web dashboard.</p>
+        <a class="btn btn-dark" href="/admin/login">Open Admin Login</a>
+      </div>
     </div>
-  `);
+  `
+  );
 
   res.status(200).send(html);
 });
@@ -636,9 +908,17 @@ app.get("/tickets/:date/download", async (req, res) => {
 app.get("/admin/login", (req, res) => {
   if (req.session?.isAdmin) return res.redirect("/admin");
 
-  const html = dashboardLayout("Admin Login", `
-    <div class="card" style="max-width:500px;margin:40px auto;">
-      <h2 class="mb16">🔐 Admin Login</h2>
+  const html = dashboardLayout(
+    "Admin Login",
+    `
+    <div class="hero">
+      <div class="tagline">Secure Admin Access</div>
+      <h1>Ticket Control Center</h1>
+      <p>Login to upload, replace, manage, and monitor ticket activity from a colorful admin dashboard.</p>
+    </div>
+
+    <div class="card" style="max-width:520px;margin:0 auto;">
+      <h2 class="section-title">🔐 Admin Login</h2>
       <form method="POST" action="/admin/login">
         <div class="mb12">
           <label class="small muted">Username</label>
@@ -651,7 +931,8 @@ app.get("/admin/login", (req, res) => {
         <button class="btn btn-primary" type="submit">Login</button>
       </form>
     </div>
-  `);
+  `
+  );
 
   res.status(200).send(html);
 });
@@ -671,10 +952,14 @@ app.post("/admin/login", (req, res) => {
     });
   }
 
-  const html = dashboardLayout("Admin Login", `
-    <div class="card" style="max-width:500px;margin:40px auto;">
-      <h2 class="mb16">🔐 Admin Login</h2>
-      <p style="color:#fca5a5;">Invalid username or password.</p>
+  const html = dashboardLayout(
+    "Admin Login",
+    `
+    <div class="card" style="max-width:520px;margin:40px auto;">
+      <h2 class="section-title">🔐 Admin Login</h2>
+      <div class="flash" style="background:linear-gradient(135deg, rgba(127,29,29,.95), rgba(239,68,68,.85)); color:#fee2e2;">
+        Invalid username or password.
+      </div>
       <form method="POST" action="/admin/login">
         <div class="mb12">
           <label class="small muted">Username</label>
@@ -687,7 +972,8 @@ app.post("/admin/login", (req, res) => {
         <button class="btn btn-primary" type="submit">Login</button>
       </form>
     </div>
-  `);
+  `
+  );
 
   res.status(401).send(html);
 });
@@ -706,84 +992,119 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
   const validTickets = await getValidTickets();
   const flash = getFlashMessage(req);
 
-  const html = dashboardLayout("🚀 Ticket Bot Admin Dashboard", `
+  const html = dashboardLayout(
+    "🚀 Ticket Bot Admin Dashboard",
+    `
+    <div class="hero">
+      <div class="tagline">Upload • Replace • Monitor • Download</div>
+      <h1>Admin Dashboard</h1>
+      <p>Manage tickets from Telegram or from the browser. Everything syncs to the same database and remains accessible for both web and bot users.</p>
+    </div>
+
     ${renderFlash(flash)}
 
+    <div class="stats">
+      <div class="stat blue">
+        <h3>Total Tickets</h3>
+        <div class="num">${tickets.length}</div>
+      </div>
+      <div class="stat green">
+        <h3>Valid Tickets</h3>
+        <div class="num">${validTickets.length}</div>
+      </div>
+      <div class="stat purple">
+        <h3>Total Downloads</h3>
+        <div class="num">${totalDownloads}</div>
+      </div>
+      <div class="stat amber">
+        <h3>Today (IST)</h3>
+        <div class="num" style="font-size:22px;">${escapeHtml(todayInIST())}</div>
+      </div>
+    </div>
+
     <div class="card">
-      <h2 class="mb16">📤 Upload Ticket from Web</h2>
-      <form method="POST" action="/admin/upload" enctype="multipart/form-data">
-        <div class="row-3">
-          <div>
-            <label class="small muted">Ticket Date</label>
-            <input type="text" name="date" placeholder="YYYY-MM-DD" required />
+      <h2 class="section-title">📤 Upload Ticket from Web</h2>
+      <div class="upload-box">
+        <form method="POST" action="/admin/upload" enctype="multipart/form-data">
+          <div class="row-3">
+            <div>
+              <label class="small muted">Ticket Date</label>
+              <input type="text" name="date" placeholder="YYYY-MM-DD" required />
+            </div>
+            <div>
+              <label class="small muted">PDF File</label>
+              <input type="file" name="ticket_pdf" accept="application/pdf,.pdf" required />
+            </div>
+            <div style="display:flex; align-items:end;">
+              <button class="btn btn-primary" type="submit">Upload Ticket</button>
+            </div>
           </div>
-          <div>
-            <label class="small muted">PDF File</label>
-            <input type="file" name="ticket_pdf" accept="application/pdf,.pdf" required />
-          </div>
-          <div style="display:flex; align-items:end;">
-            <button class="btn btn-primary" type="submit">Upload Ticket</button>
-          </div>
-        </div>
-      </form>
-      <p class="muted small" style="margin-top:12px;">
-        Upload a PDF directly from the browser. If the date already exists, the old ticket will be replaced.
+        </form>
+      </div>
+      <p class="subtle small" style="margin-top:12px;">
+        Upload a PDF directly from the browser. If the same date already exists, the old ticket will be replaced automatically.
       </p>
     </div>
 
     <div class="row">
       <div class="card">
-        <h2 class="mb8">📊 Stats</h2>
-        <p>Total Tickets: <b>${tickets.length}</b></p>
-        <p>Valid Tickets: <b>${validTickets.length}</b></p>
-        <p>Total Downloads: <b>${totalDownloads}</b></p>
-        <p>Today (IST): <b>${todayInIST()}</b></p>
+        <h2 class="section-title">📝 Features</h2>
+        <div class="mb8"><span class="pill">Web upload supported</span></div>
+        <div class="mb8"><span class="pill">Telegram upload supported</span></div>
+        <div class="mb8"><span class="pill">Same date = replace old ticket</span></div>
+        <div class="mb8"><span class="pill">Midnight cleanup in IST</span></div>
+        <div class="mb8"><span class="pill">Browser view + download</span></div>
+        <div class="mb8"><span class="pill">Telegram auto-delete</span></div>
       </div>
 
       <div class="card">
-        <h2 class="mb8">📝 Upload Instructions</h2>
-        <p>Upload tickets from Telegram or from this dashboard.</p>
-        <div class="mb8"><span class="pill">Web upload supported</span></div>
-        <div class="mb8"><span class="pill">Telegram PDF upload supported</span></div>
-        <div class="mb8"><span class="pill">Same date = replace old ticket</span></div>
-        <div class="mb8"><span class="pill">Cleanup runs daily at 12:00 AM IST</span></div>
+        <h2 class="section-title">⚙ Quick Actions</h2>
         <div class="flex" style="margin-top:14px;">
-          <a class="btn btn-dark" href="/" target="_blank">Open Public Site</a>
-          <a class="btn btn-dark" href="/admin/logout">Logout</a>
+          <a class="btn btn-dark" href="/" target="_blank">🌐 Open Public Site</a>
+          <a class="btn btn-warning" href="/health" target="_blank">💓 Health Check</a>
+          <a class="btn btn-dark" href="/admin/logout">🚪 Logout</a>
         </div>
       </div>
     </div>
 
     <div class="card">
-      <h2 class="mb16">🎫 Tickets</h2>
+      <h2 class="section-title">🎫 Tickets</h2>
       ${
         tickets.length
           ? `
             <table>
-              <tr>
-                <th>Date</th>
-                <th>File</th>
-                <th>Uploaded</th>
-                <th>Actions</th>
-              </tr>
-              ${tickets
-                .map(
-                  (t) => `
-                    <tr>
-                      <td>${escapeHtml(t.date)}</td>
-                      <td>${escapeHtml(t.file_name || "ticket.pdf")}</td>
-                      <td>${t.updated_at ? escapeHtml(formatDateTimeIST(t.updated_at)) : "-"}</td>
-                      <td class="flex">
-                        <a class="btn btn-secondary" target="_blank" href="/tickets/${encodeURIComponent(t.date)}/view">View</a>
-                        <a class="btn btn-primary" href="/tickets/${encodeURIComponent(t.date)}/download">Download</a>
-                        <form method="POST" action="/admin/delete/${encodeURIComponent(t.date)}" onsubmit="return confirm('Delete ticket for ${escapeHtml(t.date)}?')">
-                          <button class="btn btn-danger" type="submit">Delete</button>
-                        </form>
-                      </td>
-                    </tr>
-                  `
-                )
-                .join("")}
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>File</th>
+                  <th>Source</th>
+                  <th>Uploaded</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tickets
+                  .map(
+                    (t) => `
+                      <tr>
+                        <td>${escapeHtml(t.date)}</td>
+                        <td>${escapeHtml(t.file_name || "ticket.pdf")}</td>
+                        <td>${escapeHtml(t.source_type || "unknown")}</td>
+                        <td>${t.updated_at ? escapeHtml(formatDateTimeIST(t.updated_at)) : "-"}</td>
+                        <td>
+                          <div class="flex">
+                            <a class="btn btn-secondary" target="_blank" href="/tickets/${encodeURIComponent(t.date)}/view">👁 View</a>
+                            <a class="btn btn-primary" href="/tickets/${encodeURIComponent(t.date)}/download">⬇ Download</a>
+                            <form method="POST" action="/admin/delete/${encodeURIComponent(t.date)}" onsubmit="return confirm('Delete ticket for ${escapeHtml(t.date)}?')">
+                              <button class="btn btn-danger" type="submit">🗑 Delete</button>
+                            </form>
+                          </div>
+                        </td>
+                      </tr>
+                    `
+                  )
+                  .join("")}
+              </tbody>
             </table>
           `
           : `<p>No tickets found.</p>`
@@ -791,35 +1112,40 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
     </div>
 
     <div class="card">
-      <h2 class="mb16">📥 Recent Downloads</h2>
+      <h2 class="section-title">📥 Recent Downloads</h2>
       ${
         logs.length
           ? `
             <table>
-              <tr>
-                <th>User</th>
-                <th>Date</th>
-                <th>Source</th>
-                <th>Time</th>
-              </tr>
-              ${logs
-                .map(
-                  (l) => `
-                    <tr>
-                      <td>${escapeHtml(l.username || l.full_name || "unknown")}</td>
-                      <td>${escapeHtml(l.date || "-")}</td>
-                      <td>${escapeHtml(l.source || "-")}</td>
-                      <td>${escapeHtml(formatDateTimeIST(l.time))}</td>
-                    </tr>
-                  `
-                )
-                .join("")}
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Date</th>
+                  <th>Source</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${logs
+                  .map(
+                    (l) => `
+                      <tr>
+                        <td>${escapeHtml(l.username || l.full_name || "unknown")}</td>
+                        <td>${escapeHtml(l.date || "-")}</td>
+                        <td>${escapeHtml(l.source || "-")}</td>
+                        <td>${escapeHtml(formatDateTimeIST(l.time))}</td>
+                      </tr>
+                    `
+                  )
+                  .join("")}
+              </tbody>
             </table>
           `
           : `<p>No download logs yet.</p>`
       }
     </div>
-  `);
+  `
+  );
 
   res.status(200).send(html);
 });
@@ -846,7 +1172,6 @@ app.post("/admin/upload", requireAdminLogin, (req, res) => {
         return res.redirect("/admin");
       }
 
-      // Send uploaded PDF to admin Telegram chat to get Telegram file_id
       const sentMessage = await bot.sendDocument(
         ADMIN_ID,
         file.buffer,
@@ -864,6 +1189,8 @@ app.post("/admin/upload", requireAdminLogin, (req, res) => {
         setFlashMessage(req, "error", "Upload failed while storing the file in Telegram.");
         return res.redirect("/admin");
       }
+
+      scheduleDelete(ADMIN_ID, sentMessage.message_id);
 
       await saveOrReplaceTicket({
         date,
