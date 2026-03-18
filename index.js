@@ -16,7 +16,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-session-secret";
 
 const TIMEZONE = "Asia/Kolkata";
-const MENU_DELETE_MS = Number(process.env.MENU_DELETE_MS || 30 * 60 * 1000); // 30 mins
+const MENU_DELETE_MS = Number(process.env.MENU_DELETE_MS || 30 * 60 * 1000);
 const APP_NAME = "Yercaud Express Ticket Bot";
 
 if (
@@ -34,6 +34,8 @@ if (
 
 // ---------------- APP / BOT ----------------
 const app = express();
+app.set("trust proxy", 1);
+
 const bot = new TelegramBot(BOT_TOKEN);
 const WEBHOOK_PATH = `/telegram/${BOT_TOKEN}`;
 const WEBHOOK_URL = `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}`;
@@ -42,8 +44,7 @@ const client = new MongoClient(MONGO_URI);
 let ticketsCollection;
 let logsCollection;
 
-// In-memory admin upload state
-// { [chatId]: { file_id, file_unique_id, file_name, mime_type, file_size, uploaded_at } }
+// Pending admin uploads in memory
 const pendingAdminUploads = new Map();
 
 // ---------------- MIDDLEWARE ----------------
@@ -59,7 +60,7 @@ app.use(
       httpOnly: true,
       secure: true,
       sameSite: "lax",
-      maxAge: 24 * 60 * 60 * 1000, // 1 day
+      maxAge: 24 * 60 * 60 * 1000,
     },
   })
 );
@@ -156,7 +157,7 @@ async function logDownload(user, date, source = "telegram") {
     username: user?.username || user?.first_name || "unknown",
     full_name: [user?.first_name, user?.last_name].filter(Boolean).join(" ") || "unknown",
     date,
-    source, // telegram / web
+    source,
     time: new Date(),
   });
 }
@@ -174,7 +175,7 @@ async function scheduleDeleteMessage(chatId, messageId, delayMs = MENU_DELETE_MS
     try {
       await bot.deleteMessage(chatId, String(messageId));
     } catch (err) {
-      // Ignore delete failures
+      // ignore
     }
   }, delayMs);
 }
@@ -266,13 +267,9 @@ function dashboardLayout(title, content) {
       .small {
         font-size: 13px;
       }
-      .center {
-        text-align: center;
-      }
       .mb8 { margin-bottom: 8px; }
       .mb12 { margin-bottom: 12px; }
       .mb16 { margin-bottom: 16px; }
-      .mb20 { margin-bottom: 20px; }
       .flex {
         display: flex;
         gap: 10px;
@@ -292,9 +289,6 @@ function dashboardLayout(title, content) {
         .row {
           grid-template-columns: 1fr;
         }
-        table {
-          font-size: 14px;
-        }
       }
     </style>
   </head>
@@ -308,9 +302,7 @@ function dashboardLayout(title, content) {
   `;
 }
 
-// ---------------- TELEGRAM BOT ----------------
-
-// Start command for everyone
+// ---------------- TELEGRAM ----------------
 bot.onText(/\/start/, async (msg) => {
   try {
     const chatId = msg.chat.id;
@@ -334,7 +326,6 @@ bot.onText(/\/start/, async (msg) => {
   }
 });
 
-// Admin help command
 bot.onText(/\/admin/, async (msg) => {
   if (!adminOnly(msg)) return;
 
@@ -350,14 +341,12 @@ bot.onText(/\/admin/, async (msg) => {
   await bot.sendMessage(msg.chat.id, text);
 });
 
-// Cancel pending admin upload
 bot.onText(/\/cancel/, async (msg) => {
   if (!adminOnly(msg)) return;
   pendingAdminUploads.delete(msg.chat.id);
   await bot.sendMessage(msg.chat.id, "✅ Pending upload cancelled.");
 });
 
-// Handle admin PDF upload
 bot.on("document", async (msg) => {
   try {
     if (!adminOnly(msg)) return;
@@ -410,7 +399,6 @@ bot.on("document", async (msg) => {
   }
 });
 
-// Handle admin date reply after upload
 bot.on("message", async (msg) => {
   try {
     if (!adminOnly(msg)) return;
@@ -443,7 +431,6 @@ bot.on("message", async (msg) => {
   }
 });
 
-// Handle button click
 bot.on("callback_query", async (query) => {
   try {
     const data = query.data || "";
@@ -470,7 +457,6 @@ bot.on("callback_query", async (query) => {
 
     await logDownload(query.from, date, "telegram");
 
-    // Delete old keyboard after selection, ignore errors
     try {
       if (query.message?.message_id) {
         await bot.deleteMessage(chatId, String(query.message.message_id));
@@ -484,7 +470,7 @@ bot.on("callback_query", async (query) => {
   }
 });
 
-// ---------------- TELEGRAM WEBHOOK ROUTE ----------------
+// ---------------- WEBHOOK ----------------
 app.post(WEBHOOK_PATH, async (req, res) => {
   try {
     await bot.processUpdate(req.body);
@@ -594,7 +580,7 @@ app.get("/tickets/:date/download", async (req, res) => {
   }
 });
 
-// ---------------- ADMIN AUTH ROUTES ----------------
+// ---------------- ADMIN AUTH ----------------
 app.get("/admin/login", (req, res) => {
   if (req.session?.isAdmin) return res.redirect("/admin");
 
@@ -612,7 +598,7 @@ app.get("/admin/login", (req, res) => {
         </div>
         <button class="btn btn-primary" type="submit">Login</button>
       </form>
-      <p class="muted small mb0" style="margin-top:16px;">
+      <p class="muted small" style="margin-top:16px;">
         After login, you can manage tickets from the dashboard. Upload new tickets through Telegram using the admin account.
       </p>
     </div>
@@ -626,7 +612,14 @@ app.post("/admin/login", (req, res) => {
 
   if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
     req.session.isAdmin = true;
-    return res.redirect("/admin");
+
+    return req.session.save((err) => {
+      if (err) {
+        console.error("Session save error:", err);
+        return res.status(500).send("Login failed");
+      }
+      return res.redirect("/admin");
+    });
   }
 
   const html = dashboardLayout("Admin Login", `
@@ -792,10 +785,8 @@ async function startServer() {
   try {
     await connectDB();
 
-    // Run cleanup at startup too
     await cleanupExpiredTickets();
 
-    // Daily cleanup at 12:00 AM IST
     cron.schedule(
       "0 0 * * *",
       async () => {
