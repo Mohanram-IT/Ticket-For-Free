@@ -3,6 +3,7 @@ const session = require("express-session");
 const TelegramBot = require("node-telegram-bot-api");
 const { MongoClient } = require("mongodb");
 const cron = require("node-cron");
+const multer = require("multer");
 
 // ---------------- ENV ----------------
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -44,8 +45,26 @@ const client = new MongoClient(MONGO_URI);
 let ticketsCollection;
 let logsCollection;
 
-// Pending admin uploads in memory
 const pendingAdminUploads = new Map();
+
+// ---------------- MULTER ----------------
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10 MB
+  },
+  fileFilter: (req, file, cb) => {
+    const isPdf =
+      file.mimetype === "application/pdf" ||
+      String(file.originalname || "").toLowerCase().endsWith(".pdf");
+
+    if (!isPdf) {
+      return cb(new Error("Only PDF files are allowed"));
+    }
+
+    cb(null, true);
+  },
+});
 
 // ---------------- MIDDLEWARE ----------------
 app.use(express.urlencoded({ extended: true }));
@@ -126,6 +145,10 @@ function extractDate(text = "") {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function isValidDate(date) {
+  return extractDate(date) === date;
+}
+
 async function getValidTickets() {
   const today = todayInIST();
   return ticketsCollection.find({ date: { $gte: today } }).sort({ date: 1 }).toArray();
@@ -174,9 +197,7 @@ async function scheduleDeleteMessage(chatId, messageId, delayMs = MENU_DELETE_MS
   setTimeout(async () => {
     try {
       await bot.deleteMessage(chatId, String(messageId));
-    } catch (err) {
-      // ignore
-    }
+    } catch (_) {}
   }, delayMs);
 }
 
@@ -187,6 +208,30 @@ function adminOnly(msg) {
 function requireAdminLogin(req, res, next) {
   if (req.session && req.session.isAdmin) return next();
   return res.redirect("/admin/login");
+}
+
+function getFlashMessage(req) {
+  const flash = req.session?.flash || null;
+  if (req.session) req.session.flash = null;
+  return flash;
+}
+
+function setFlashMessage(req, type, text) {
+  if (req.session) {
+    req.session.flash = { type, text };
+  }
+}
+
+function renderFlash(flash) {
+  if (!flash) return "";
+  const bg = flash.type === "error" ? "#7f1d1d" : "#14532d";
+  const color = flash.type === "error" ? "#fecaca" : "#bbf7d0";
+
+  return `
+    <div style="background:${bg}; color:${color}; padding:12px 14px; border-radius:10px; margin-bottom:16px;">
+      ${escapeHtml(flash.text)}
+    </div>
+  `;
 }
 
 function dashboardLayout(title, content) {
@@ -211,7 +256,7 @@ function dashboardLayout(title, content) {
         font-weight: 700;
       }
       .wrap {
-        max-width: 1100px;
+        max-width: 1200px;
         margin: 0 auto;
         padding: 20px;
       }
@@ -250,6 +295,7 @@ function dashboardLayout(title, content) {
       .btn-danger { background: #ef4444; color: white; }
       .btn-secondary { background: #3b82f6; color: white; }
       .btn-dark { background: #0f172a; color: white; border: 1px solid #334155; }
+      .btn-warning { background: #f59e0b; color: #111827; }
       input {
         width: 100%;
         padding: 12px;
@@ -259,9 +305,17 @@ function dashboardLayout(title, content) {
         color: white;
         box-sizing: border-box;
       }
+      input[type="file"] {
+        padding: 10px;
+      }
       .row {
         display: grid;
         grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .row-3 {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
         gap: 16px;
       }
       .small {
@@ -286,8 +340,12 @@ function dashboardLayout(title, content) {
         font-size: 12px;
       }
       @media (max-width: 768px) {
-        .row {
+        .row, .row-3 {
           grid-template-columns: 1fr;
+        }
+        .flex {
+          flex-direction: column;
+          align-items: flex-start;
         }
       }
     </style>
@@ -353,7 +411,6 @@ bot.on("document", async (msg) => {
 
     const doc = msg.document;
     const chatId = msg.chat.id;
-
     if (!doc) return;
 
     const mimeType = doc.mime_type || "";
@@ -369,6 +426,7 @@ bot.on("document", async (msg) => {
       mime_type: doc.mime_type || "application/pdf",
       file_size: doc.file_size || 0,
       uploaded_at: new Date(),
+      source_type: "telegram_upload",
     };
 
     const autoDate = extractDate(doc.file_name || "");
@@ -450,10 +508,16 @@ bot.on("callback_query", async (query) => {
     }
 
     await bot.answerCallbackQuery(query.id, { text: `Sending ticket for ${date}` });
-    await bot.sendDocument(chatId, ticket.file_id, {}, {
-      filename: ticket.file_name || `${date}.pdf`,
-      contentType: ticket.mime_type || "application/pdf",
-    });
+
+    if (ticket.file_id) {
+      await bot.sendDocument(chatId, ticket.file_id, {}, {
+        filename: ticket.file_name || `${date}.pdf`,
+        contentType: ticket.mime_type || "application/pdf",
+      });
+    } else {
+      const fileLink = await bot.getFileLink(ticket.file_id);
+      await bot.sendMessage(chatId, `📄 Open your ticket: ${fileLink}`);
+    }
 
     await logDownload(query.from, date, "telegram");
 
@@ -539,16 +603,10 @@ app.get("/tickets/:date/view", async (req, res) => {
     const date = req.params.date;
     const ticket = await ticketsCollection.findOne({ date });
 
-    if (!ticket) {
-      return res.status(404).send("Ticket not found");
-    }
+    if (!ticket) return res.status(404).send("Ticket not found");
 
     const fileLink = await bot.getFileLink(ticket.file_id);
-    await logDownload(
-      { id: null, username: "web-view", first_name: "Web User" },
-      date,
-      "web"
-    );
+    await logDownload({ id: null, username: "web-view", first_name: "Web User" }, date, "web");
 
     return res.redirect(fileLink);
   } catch (err) {
@@ -562,16 +620,10 @@ app.get("/tickets/:date/download", async (req, res) => {
     const date = req.params.date;
     const ticket = await ticketsCollection.findOne({ date });
 
-    if (!ticket) {
-      return res.status(404).send("Ticket not found");
-    }
+    if (!ticket) return res.status(404).send("Ticket not found");
 
     const fileLink = await bot.getFileLink(ticket.file_id);
-    await logDownload(
-      { id: null, username: "web-download", first_name: "Web User" },
-      date,
-      "web"
-    );
+    await logDownload({ id: null, username: "web-download", first_name: "Web User" }, date, "web");
 
     return res.redirect(fileLink);
   } catch (err) {
@@ -598,9 +650,6 @@ app.get("/admin/login", (req, res) => {
         </div>
         <button class="btn btn-primary" type="submit">Login</button>
       </form>
-      <p class="muted small" style="margin-top:16px;">
-        After login, you can manage tickets from the dashboard. Upload new tickets through Telegram using the admin account.
-      </p>
     </div>
   `);
 
@@ -655,8 +704,33 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
   const logs = await logsCollection.find().sort({ time: -1 }).limit(25).toArray();
   const totalDownloads = await logsCollection.countDocuments();
   const validTickets = await getValidTickets();
+  const flash = getFlashMessage(req);
 
   const html = dashboardLayout("🚀 Ticket Bot Admin Dashboard", `
+    ${renderFlash(flash)}
+
+    <div class="card">
+      <h2 class="mb16">📤 Upload Ticket from Web</h2>
+      <form method="POST" action="/admin/upload" enctype="multipart/form-data">
+        <div class="row-3">
+          <div>
+            <label class="small muted">Ticket Date</label>
+            <input type="text" name="date" placeholder="YYYY-MM-DD" required />
+          </div>
+          <div>
+            <label class="small muted">PDF File</label>
+            <input type="file" name="ticket_pdf" accept="application/pdf,.pdf" required />
+          </div>
+          <div style="display:flex; align-items:end;">
+            <button class="btn btn-primary" type="submit">Upload Ticket</button>
+          </div>
+        </div>
+      </form>
+      <p class="muted small" style="margin-top:12px;">
+        Upload a PDF directly from the browser. If the date already exists, the old ticket will be replaced.
+      </p>
+    </div>
+
     <div class="row">
       <div class="card">
         <h2 class="mb8">📊 Stats</h2>
@@ -668,10 +742,9 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
 
       <div class="card">
         <h2 class="mb8">📝 Upload Instructions</h2>
-        <p>Upload tickets from Telegram using the admin account.</p>
-        <div class="mb8"><span class="pill">Send PDF directly to bot</span></div>
-        <div class="mb8"><span class="pill">Auto date if filename contains YYYY-MM-DD</span></div>
-        <div class="mb8"><span class="pill">Else bot asks for date</span></div>
+        <p>Upload tickets from Telegram or from this dashboard.</p>
+        <div class="mb8"><span class="pill">Web upload supported</span></div>
+        <div class="mb8"><span class="pill">Telegram PDF upload supported</span></div>
         <div class="mb8"><span class="pill">Same date = replace old ticket</span></div>
         <div class="mb8"><span class="pill">Cleanup runs daily at 12:00 AM IST</span></div>
         <div class="flex" style="margin-top:14px;">
@@ -751,14 +824,78 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
   res.status(200).send(html);
 });
 
+// ---------------- ADMIN WEB UPLOAD ----------------
+app.post("/admin/upload", requireAdminLogin, (req, res) => {
+  upload.single("ticket_pdf")(req, res, async (err) => {
+    try {
+      if (err) {
+        setFlashMessage(req, "error", err.message || "Upload failed");
+        return res.redirect("/admin");
+      }
+
+      const date = String(req.body?.date || "").trim();
+      const file = req.file;
+
+      if (!date || !isValidDate(date)) {
+        setFlashMessage(req, "error", "Please enter a valid date in YYYY-MM-DD format.");
+        return res.redirect("/admin");
+      }
+
+      if (!file) {
+        setFlashMessage(req, "error", "Please choose a PDF file.");
+        return res.redirect("/admin");
+      }
+
+      // Send uploaded PDF to admin Telegram chat to get Telegram file_id
+      const sentMessage = await bot.sendDocument(
+        ADMIN_ID,
+        file.buffer,
+        {
+          caption: `Web upload saved for ${date}`,
+        },
+        {
+          filename: file.originalname || `${date}.pdf`,
+          contentType: "application/pdf",
+        }
+      );
+
+      const doc = sentMessage?.document;
+      if (!doc?.file_id) {
+        setFlashMessage(req, "error", "Upload failed while storing the file in Telegram.");
+        return res.redirect("/admin");
+      }
+
+      await saveOrReplaceTicket({
+        date,
+        file_id: doc.file_id,
+        file_unique_id: doc.file_unique_id,
+        file_name: file.originalname || `${date}.pdf`,
+        mime_type: "application/pdf",
+        file_size: file.size || 0,
+        uploaded_at: new Date(),
+        source_type: "web_upload",
+      });
+
+      setFlashMessage(req, "success", `Ticket uploaded successfully for ${date}.`);
+      return res.redirect("/admin");
+    } catch (error) {
+      console.error("admin web upload error:", error);
+      setFlashMessage(req, "error", "Failed to upload ticket from web.");
+      return res.redirect("/admin");
+    }
+  });
+});
+
 app.post("/admin/delete/:date", requireAdminLogin, async (req, res) => {
   try {
     const date = req.params.date;
     await ticketsCollection.deleteOne({ date });
+    setFlashMessage(req, "success", `Ticket deleted for ${date}.`);
     return res.redirect("/admin");
   } catch (err) {
     console.error("delete ticket error:", err);
-    return res.status(500).send("Failed to delete ticket");
+    setFlashMessage(req, "error", "Failed to delete ticket.");
+    return res.redirect("/admin");
   }
 });
 
