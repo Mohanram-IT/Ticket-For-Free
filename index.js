@@ -4,6 +4,9 @@ const TelegramBot = require("node-telegram-bot-api");
 const { MongoClient } = require("mongodb");
 const cron = require("node-cron");
 const multer = require("multer");
+const https = require("https");
+const http = require("http");
+const { URL } = require("url");
 
 // ---------------- ENV ----------------
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -15,6 +18,7 @@ const MONGO_URI = process.env.MONGO_URI;
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET || "change-this-session-secret";
+const TRAIN_SOUND_URL = process.env.TRAIN_SOUND_URL || "";
 
 const TIMEZONE = "Asia/Kolkata";
 const MENU_DELETE_MS = Number(process.env.MENU_DELETE_MS || 30 * 60 * 1000);
@@ -237,6 +241,59 @@ function renderFlash(flash) {
   `;
 }
 
+function requestUrl(urlString, redirectCount = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error("Too many redirects"));
+      return;
+    }
+
+    const parsed = new URL(urlString);
+    const clientLib = parsed.protocol === "http:" ? http : https;
+
+    const req = clientLib.get(parsed, (resp) => {
+      const status = resp.statusCode || 0;
+
+      if ([301, 302, 303, 307, 308].includes(status) && resp.headers.location) {
+        const redirectUrl = new URL(resp.headers.location, urlString).toString();
+        resp.resume();
+        resolve(requestUrl(redirectUrl, redirectCount + 1));
+        return;
+      }
+
+      if (status >= 400) {
+        reject(new Error(`Remote file request failed with status ${status}`));
+        return;
+      }
+
+      resolve(resp);
+    });
+
+    req.on("error", reject);
+  });
+}
+
+async function streamTelegramFileToResponse(fileUrl, res, fileName, inline = true) {
+  const remoteResponse = await requestUrl(fileUrl);
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `${inline ? "inline" : "attachment"}; filename="${String(fileName || "ticket.pdf").replace(/"/g, "")}"`
+  );
+
+  const contentLength = remoteResponse.headers["content-length"];
+  if (contentLength) {
+    res.setHeader("Content-Length", contentLength);
+  }
+
+  return new Promise((resolve, reject) => {
+    remoteResponse.pipe(res);
+    remoteResponse.on("end", resolve);
+    remoteResponse.on("error", reject);
+  });
+}
+
 function themeAndInteractionScript() {
   return `
     <div id="train-cursor" aria-hidden="true">🚂</div>
@@ -267,6 +324,7 @@ function themeAndInteractionScript() {
 
     <script>
       (function () {
+        const TRAIN_SOUND_URL = ${JSON.stringify(TRAIN_SOUND_URL)};
         const root = document.documentElement;
         const savedTheme = localStorage.getItem("ticket_theme") || "dark";
         root.setAttribute("data-theme", savedTheme);
@@ -309,7 +367,7 @@ function themeAndInteractionScript() {
           if (cursor) cursor.style.opacity = "1";
         });
 
-        function playLongTrainHorn() {
+        function playFallbackHorn() {
           try {
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
             if (!AudioCtx) return;
@@ -369,7 +427,7 @@ function themeAndInteractionScript() {
           } catch (_) {}
         }
 
-        function playRunningTrainSound(durationMs = 1800) {
+        function playFallbackRunning(durationMs = 2500) {
           try {
             const AudioCtx = window.AudioContext || window.webkitAudioContext;
             if (!AudioCtx) return;
@@ -377,7 +435,7 @@ function themeAndInteractionScript() {
             const now = ctx.currentTime;
             const master = ctx.createGain();
             master.gain.setValueAtTime(0.0001, now);
-            master.gain.exponentialRampToValueAtTime(0.09, now + 0.05);
+            master.gain.exponentialRampToValueAtTime(0.10, now + 0.05);
             master.connect(ctx.destination);
 
             const bufferSize = 2 * ctx.sampleRate;
@@ -401,8 +459,8 @@ function themeAndInteractionScript() {
 
             const lfo = ctx.createOscillator();
             const lfoGain = ctx.createGain();
-            lfo.frequency.value = 8;
-            lfoGain.gain.value = 0.22;
+            lfo.frequency.value = 7;
+            lfoGain.gain.value = 0.24;
 
             lfo.connect(lfoGain);
             lfoGain.connect(tremolo.gain);
@@ -421,15 +479,44 @@ function themeAndInteractionScript() {
 
             setTimeout(() => {
               try { ctx.close(); } catch (_) {}
-            }, durationMs + 400);
+            }, durationMs + 500);
           } catch (_) {}
+        }
+
+        function playDirectSound(url, maxMs = 5000) {
+          try {
+            if (!url) return false;
+            const audio = new Audio(url);
+            audio.preload = "auto";
+            audio.currentTime = 0;
+            audio.play().catch(() => {});
+            setTimeout(() => {
+              try {
+                audio.pause();
+                audio.currentTime = 0;
+              } catch (_) {}
+            }, maxMs);
+            return true;
+          } catch (_) {
+            return false;
+          }
+        }
+
+        function playClickSound() {
+          const ok = playDirectSound(TRAIN_SOUND_URL, 1800);
+          if (!ok) playFallbackHorn();
+        }
+
+        function playLoadingSound() {
+          const ok = playDirectSound(TRAIN_SOUND_URL, 4500);
+          if (!ok) playFallbackRunning(2600);
         }
 
         document.addEventListener("click", function (e) {
           const clickable = e.target.closest("a, button");
           if (!clickable) return;
 
-          playLongTrainHorn();
+          playClickSound();
 
           if (cursor) {
             cursor.classList.remove("cursor-pop");
@@ -445,7 +532,7 @@ function themeAndInteractionScript() {
               loader.classList.remove("hidden");
               loader.setAttribute("aria-hidden", "false");
             }
-            playRunningTrainSound(2200);
+            playLoadingSound();
           });
         });
 
@@ -459,7 +546,7 @@ function themeAndInteractionScript() {
           modal.classList.remove("hidden");
           modal.setAttribute("aria-hidden", "false");
           document.body.classList.add("modal-open");
-          playRunningTrainSound(1600);
+          playLoadingSound();
         }
 
         function closePdfModal() {
@@ -478,15 +565,11 @@ function themeAndInteractionScript() {
           });
         });
 
-        if (closeBtn) {
-          closeBtn.addEventListener("click", closePdfModal);
-        }
+        if (closeBtn) closeBtn.addEventListener("click", closePdfModal);
 
         if (modal) {
           modal.addEventListener("click", function (e) {
-            if (e.target.classList.contains("pdf-backdrop")) {
-              closePdfModal();
-            }
+            if (e.target.classList.contains("pdf-backdrop")) closePdfModal();
           });
         }
 
@@ -543,9 +626,7 @@ function dashboardLayout(title, content) {
 
       * { box-sizing: border-box; }
 
-      html, body {
-        cursor: none;
-      }
+      html, body { cursor: none; }
 
       body {
         margin: 0;
@@ -559,13 +640,8 @@ function dashboardLayout(title, content) {
         min-height: 100vh;
       }
 
-      body.modal-open {
-        overflow: hidden;
-      }
-
-      a, button, input, label, form {
-        cursor: none !important;
-      }
+      body.modal-open { overflow: hidden; }
+      a, button, input, label, form { cursor: none !important; }
 
       #train-cursor {
         position: fixed;
@@ -579,9 +655,7 @@ function dashboardLayout(title, content) {
         transition: opacity .18s ease;
       }
 
-      .cursor-pop {
-        animation: cursorBounce .28s ease;
-      }
+      .cursor-pop { animation: cursorBounce .28s ease; }
 
       @keyframes cursorBounce {
         0% { transform: scale(1); }
@@ -684,7 +758,6 @@ function dashboardLayout(title, content) {
         overflow: hidden;
         border: 1px solid rgba(255,255,255,.08);
         box-shadow: 0 12px 28px rgba(0,0,0,.16);
-        transform: translateY(0);
         transition: transform .22s ease, box-shadow .22s ease;
       }
 
@@ -732,13 +805,8 @@ function dashboardLayout(title, content) {
         letter-spacing: .04em;
       }
 
-      tbody tr:hover {
-        background: rgba(255,255,255,.04);
-      }
-
-      html[data-theme="light"] tbody tr:hover {
-        background: rgba(15,23,42,.03);
-      }
+      tbody tr:hover { background: rgba(255,255,255,.04); }
+      html[data-theme="light"] tbody tr:hover { background: rgba(15,23,42,.03); }
 
       .btn, button {
         display: inline-flex;
@@ -794,9 +862,7 @@ function dashboardLayout(title, content) {
         box-shadow: 0 0 0 4px rgba(59,130,246,.16);
       }
 
-      input[type="file"] {
-        padding: 10px;
-      }
+      input[type="file"] { padding: 10px; }
 
       .pill {
         background: rgba(255,255,255,.06);
@@ -809,9 +875,7 @@ function dashboardLayout(title, content) {
         margin: 0 8px 8px 0;
       }
 
-      html[data-theme="light"] .pill {
-        background: rgba(255,255,255,.85);
-      }
+      html[data-theme="light"] .pill { background: rgba(255,255,255,.85); }
 
       .flash {
         padding: 14px 16px;
@@ -848,13 +912,9 @@ function dashboardLayout(title, content) {
         margin-bottom:12px;
       }
 
-      html[data-theme="light"] .tagline {
-        background: rgba(255,255,255,.9);
-      }
+      html[data-theme="light"] .tagline { background: rgba(255,255,255,.9); }
 
-      .theme-btn {
-        min-width: 128px;
-      }
+      .theme-btn { min-width: 128px; }
 
       .pdf-modal {
         position: fixed;
@@ -862,9 +922,7 @@ function dashboardLayout(title, content) {
         z-index: 9998;
       }
 
-      .pdf-modal.hidden {
-        display: none;
-      }
+      .pdf-modal.hidden { display: none; }
 
       .pdf-backdrop {
         position: absolute;
@@ -906,7 +964,7 @@ function dashboardLayout(title, content) {
 
       .pdf-frame-wrap {
         flex: 1;
-        background: rgba(15,23,42,.08);
+        background: rgba(255,255,255,.35);
       }
 
       #pdf-frame {
@@ -922,9 +980,7 @@ function dashboardLayout(title, content) {
         z-index: 10000;
       }
 
-      .page-loader.hidden {
-        display: none;
-      }
+      .page-loader.hidden { display: none; }
 
       .page-loader-backdrop {
         position: absolute;
@@ -984,36 +1040,22 @@ function dashboardLayout(title, content) {
       }
 
       @media (max-width: 980px) {
-        .row, .row-3, .stats {
-          grid-template-columns: 1fr;
-        }
+        .row, .row-3, .stats { grid-template-columns: 1fr; }
       }
 
       @media (max-width: 768px) {
-        html, body, a, button, input, label, form {
-          cursor: auto !important;
-        }
+        html, body, a, button, input, label, form { cursor: auto !important; }
+        #train-cursor { display: none; }
 
-        #train-cursor {
-          display: none;
-        }
-
-        .wrap {
-          padding: 16px;
-        }
-
-        .hero h1 {
-          font-size: 28px;
-        }
+        .wrap { padding: 16px; }
+        .hero h1 { font-size: 28px; }
 
         .flex {
           flex-direction: column;
           align-items: stretch;
         }
 
-        .btn, button {
-          width: 100%;
-        }
+        .btn, button { width: 100%; }
 
         .topbar-inner {
           flex-direction: column;
@@ -1299,7 +1341,7 @@ app.get("/", async (req, res) => {
                       <td>${escapeHtml(t.date)}</td>
                       <td>
                         <div class="flex">
-                          <button class="btn btn-secondary" type="button" data-view-pdf="/tickets/${encodeURIComponent(t.date)}/inline">👁 View</button>
+                          <button class="btn btn-secondary" type="button" data-view-pdf="/tickets/${encodeURIComponent(t.date)}/stream?mode=inline">👁 View</button>
                           <a class="btn btn-primary" href="/tickets/${encodeURIComponent(t.date)}/download">⬇ Download</a>
                         </div>
                       </td>
@@ -1339,38 +1381,39 @@ app.get("/tickets", async (req, res) => {
   return res.redirect("/");
 });
 
-app.get("/tickets/:date/inline", async (req, res) => {
+app.get("/tickets/:date/stream", async (req, res) => {
   try {
     const date = req.params.date;
+    const mode = req.query.mode === "download" ? "download" : "inline";
     const ticket = await ticketsCollection.findOne({ date });
 
-    if (!ticket) return res.status(404).send("Ticket not found");
+    if (!ticket) {
+      return res.status(404).send("Ticket not found");
+    }
 
     const fileLink = await bot.getFileLink(ticket.file_id);
-    await logDownload({ id: null, username: "web-view", first_name: "Web User" }, date, "web-view");
+    await logDownload(
+      { id: null, username: mode === "download" ? "web-download" : "web-view", first_name: "Web User" },
+      date,
+      mode === "download" ? "web-download" : "web-view"
+    );
 
-    return res.redirect(fileLink);
+    await streamTelegramFileToResponse(
+      fileLink,
+      res,
+      ticket.file_name || `${date}.pdf`,
+      mode !== "download"
+    );
   } catch (err) {
-    console.error("inline route error:", err);
-    return res.status(500).send("Failed to open ticket");
+    console.error("stream route error:", err);
+    if (!res.headersSent) {
+      res.status(500).send("Failed to open ticket");
+    }
   }
 });
 
 app.get("/tickets/:date/download", async (req, res) => {
-  try {
-    const date = req.params.date;
-    const ticket = await ticketsCollection.findOne({ date });
-
-    if (!ticket) return res.status(404).send("Ticket not found");
-
-    const fileLink = await bot.getFileLink(ticket.file_id);
-    await logDownload({ id: null, username: "web-download", first_name: "Web User" }, date, "web-download");
-
-    return res.redirect(fileLink);
-  } catch (err) {
-    console.error("download route error:", err);
-    return res.status(500).send("Failed to download ticket");
-  }
+  return res.redirect(`/tickets/${encodeURIComponent(req.params.date)}/stream?mode=download`);
 });
 
 // ---------------- ADMIN AUTH ----------------
@@ -1568,7 +1611,7 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
                         <td>${t.updated_at ? escapeHtml(formatDateTimeIST(t.updated_at)) : "-"}</td>
                         <td>
                           <div class="flex">
-                            <button class="btn btn-secondary" type="button" data-view-pdf="/tickets/${encodeURIComponent(t.date)}/inline">👁 View</button>
+                            <button class="btn btn-secondary" type="button" data-view-pdf="/tickets/${encodeURIComponent(t.date)}/stream?mode=inline">👁 View</button>
                             <a class="btn btn-primary" href="/tickets/${encodeURIComponent(t.date)}/download">⬇ Download</a>
                             <form method="POST" action="/admin/delete/${encodeURIComponent(t.date)}" onsubmit="return confirm('Delete ticket for ${escapeHtml(t.date)}?')">
                               <button class="btn btn-danger" type="submit">🗑 Delete</button>
