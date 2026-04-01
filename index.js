@@ -195,7 +195,7 @@ async function logDownload(user, date, source = "telegram") {
 async function cleanupExpiredTickets() {
   const today = todayInIST();
   const result = await ticketsCollection.deleteMany({ date: { $lt: today } });
-  console.log(\`Cleanup done 🧹 Deleted \${result.deletedCount} expired ticket(s)\`);
+  console.log(`Cleanup done 🧹 Deleted ${result.deletedCount} expired ticket(s)`);
 }
 
 function scheduleDelete(chatId, messageId, delayMs = MENU_DELETE_MS) {
@@ -265,7 +265,7 @@ function requestUrl(urlString, redirectCount = 0) {
       }
 
       if (status >= 400) {
-        reject(new Error(\`Remote file request failed with status \${status}\`));
+        reject(new Error(`Remote file request failed with status ${status}`));
         return;
       }
 
@@ -282,7 +282,7 @@ async function streamTelegramFileToResponse(fileUrl, res, fileName, inline = tru
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
-    \`\${inline ? "inline" : "attachment"}; filename="\${String(fileName || "ticket.pdf").replace(/"/g, "")}"\`
+    `${inline ? "inline" : "attachment"}; filename="${String(fileName || "ticket.pdf").replace(/"/g, "")}"`
   );
 
   const contentLength = remoteResponse.headers["content-length"];
@@ -603,13 +603,13 @@ function themeAndInteractionScript() {
 }
 
 function dashboardLayout(title, content) {
-  return \`
+  return `
   <!DOCTYPE html>
   <html data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>\${escapeHtml(title)}</title>
+    <title>${escapeHtml(title)}</title>
     <style>
       :root {
         --bg-grad-1: #020617;
@@ -1193,7 +1193,7 @@ bot.on("document", async (msg) => {
 
       const reply = await bot.sendMessage(
         chatId,
-        \`✅ Ticket saved for \${autoDate}\n📄 File: \${payload.file_name}\n♻️ If this date already existed, it was replaced.\`
+        `✅ Ticket saved for ${autoDate}\n📄 File: ${payload.file_name}\n♻️ If this date already existed, it was replaced.`
       );
       scheduleDelete(chatId, reply.message_id);
       return;
@@ -1243,7 +1243,7 @@ bot.on("message", async (msg) => {
 
     const reply = await bot.sendMessage(
       chatId,
-      \`✅ Ticket saved for \${date}\n📄 File: \${pending.file_name}\n♻️ If this date already existed, it was replaced.\`
+      `✅ Ticket saved for ${date}\n📄 File: ${pending.file_name}\n♻️ If this date already existed, it was replaced.`
     );
     scheduleDelete(chatId, reply.message_id);
   } catch (err) {
@@ -1269,10 +1269,10 @@ bot.on("callback_query", async (query) => {
       return;
     }
 
-    await bot.answerCallbackQuery(query.id, { text: \`Sending ticket for \${date}\` });
+    await bot.answerCallbackQuery(query.id, { text: `Sending ticket for ${date}` });
 
     const sentDoc = await bot.sendDocument(chatId, ticket.file_id, {}, {
-      filename: ticket.file_name || \`\${date}.pdf\`,
+      filename: ticket.file_name || `${date}.pdf`,
       contentType: ticket.mime_type || "application/pdf",
     });
 
@@ -1310,7 +1310,7 @@ app.get("/", async (req, res) => {
 
   const html = dashboardLayout(
     APP_NAME,
-    \`
+    `
     <div class="hero">
       <div class="tagline">Fast • Clean • Browser + Telegram Access</div>
       <h1>Download your train tickets beautifully</h1>
@@ -1320,11 +1320,11 @@ app.get("/", async (req, res) => {
     <div class="stats">
       <div class="stat blue">
         <h3>Valid Tickets</h3>
-        <div class="num">\${tickets.length}</div>
+        <div class="num">${tickets.length}</div>
       </div>
       <div class="stat green">
         <h3>Today (IST)</h3>
-        <div class="num" style="font-size:22px;">\${escapeHtml(todayInIST())}</div>
+        <div class="num" style="font-size:22px;">${escapeHtml(todayInIST())}</div>
       </div>
       <div class="stat purple">
         <h3>Access Mode</h3>
@@ -1339,9 +1339,9 @@ app.get("/", async (req, res) => {
     <div class="card">
       <h2 class="section-title">🚆 Available Tickets</h2>
       <p class="subtle mb16">Choose a date below to preview or download the ticket directly from your browser.</p>
-      \${
+      ${
         tickets.length
-          ? \`
+          ? `
             <table>
               <thead>
                 <tr>
@@ -1350,25 +1350,25 @@ app.get("/", async (req, res) => {
                 </tr>
               </thead>
               <tbody>
-                \${tickets
+                ${tickets
                   .map(
-                    (t) => \`
+                    (t) => `
                     <tr>
-                      <td>\${escapeHtml(t.date)}</td>
+                      <td>${escapeHtml(t.date)}</td>
                       <td>
                         <div class="flex">
-                          <button class="btn btn-secondary" type="button" data-view-pdf="/tickets/\${encodeURIComponent(t.date)}/stream?mode=inline">👁 View</button>
-                          <a class="btn btn-primary" href="/tickets/\${encodeURIComponent(t.date)}/download">⬇ Download</a>
+                          <button class="btn btn-secondary" type="button" data-view-pdf="/tickets/${encodeURIComponent(t.date)}/stream?mode=inline">👁 View</button>
+                          <a class="btn btn-primary" href="/tickets/${encodeURIComponent(t.date)}/download">⬇ Download</a>
                         </div>
                       </td>
                     </tr>
-                  \`
+                  `
                   )
                   .join("")}
               </tbody>
             </table>
-          \`
-          : \`<p>❌ No valid tickets available.</p>\`
+          `
+          : `<p>❌ No valid tickets available.</p>`
       }
     </div>
 
@@ -1387,7 +1387,7 @@ app.get("/", async (req, res) => {
         <a class="btn btn-dark" href="/admin/login">Open Admin Login</a>
       </div>
     </div>
-  \`
+  `
   );
 
   res.status(200).send(html);
@@ -1417,7 +1417,7 @@ app.get("/tickets/:date/stream", async (req, res) => {
     await streamTelegramFileToResponse(
       fileLink,
       res,
-      ticket.file_name || \`\${date}.pdf\`,
+      ticket.file_name || `${date}.pdf`,
       mode !== "download"
     );
   } catch (err) {
@@ -1429,7 +1429,7 @@ app.get("/tickets/:date/stream", async (req, res) => {
 });
 
 app.get("/tickets/:date/download", async (req, res) => {
-  return res.redirect(\`/tickets/\${encodeURIComponent(req.params.date)}/stream?mode=download\`);
+  return res.redirect(`/tickets/${encodeURIComponent(req.params.date)}/stream?mode=download`);
 });
 
 // ---------------- ADMIN AUTH ----------------
@@ -1438,7 +1438,7 @@ app.get("/admin/login", (req, res) => {
 
   const html = dashboardLayout(
     "Admin Login",
-    \`
+    `
     <div class="hero">
       <div class="tagline">Secure Admin Access</div>
       <h1>Ticket Control Center</h1>
@@ -1462,7 +1462,7 @@ app.get("/admin/login", (req, res) => {
         </div>
       </form>
     </div>
-  \`
+  `
   );
 
   res.status(200).send(html);
@@ -1485,7 +1485,7 @@ app.post("/admin/login", (req, res) => {
 
   const html = dashboardLayout(
     "Admin Login",
-    \`
+    `
     <div class="card" style="max-width:520px;margin:40px auto;">
       <h2 class="section-title">🔐 Admin Login</h2>
       <div class="flash" style="background:linear-gradient(135deg, rgba(127,29,29,.95), rgba(239,68,68,.85)); color:#fee2e2;">
@@ -1506,7 +1506,7 @@ app.post("/admin/login", (req, res) => {
         </div>
       </form>
     </div>
-  \`
+  `
   );
 
   res.status(401).send(html);
@@ -1528,31 +1528,31 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
 
   const html = dashboardLayout(
     "🚀 Ticket Bot Admin Dashboard",
-    \`
+    `
     <div class="hero">
       <div class="tagline">Upload • Replace • Monitor • Download</div>
       <h1>Admin Dashboard</h1>
       <p>Manage tickets from Telegram or from the browser. Everything syncs to the same database and remains accessible for both web and bot users.</p>
     </div>
 
-    \${renderFlash(flash)}
+    ${renderFlash(flash)}
 
     <div class="stats">
       <div class="stat blue">
         <h3>Total Tickets</h3>
-        <div class="num">\${tickets.length}</div>
+        <div class="num">${tickets.length}</div>
       </div>
       <div class="stat green">
         <h3>Valid Tickets</h3>
-        <div class="num">\${validTickets.length}</div>
+        <div class="num">${validTickets.length}</div>
       </div>
       <div class="stat purple">
         <h3>Total Downloads</h3>
-        <div class="num">\${totalDownloads}</div>
+        <div class="num">${totalDownloads}</div>
       </div>
       <div class="stat amber">
         <h3>Today (IST)</h3>
-        <div class="num" style="font-size:22px;">\${escapeHtml(todayInIST())}</div>
+        <div class="num" style="font-size:22px;">${escapeHtml(todayInIST())}</div>
       </div>
     </div>
 
@@ -1603,9 +1603,9 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
 
     <div class="card">
       <h2 class="section-title">🎫 Tickets</h2>
-      \${
+      ${
         tickets.length
-          ? \`
+          ? `
             <table>
               <thead>
                 <tr>
@@ -1617,39 +1617,39 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
                 </tr>
               </thead>
               <tbody>
-                \${tickets
+                ${tickets
                   .map(
-                    (t) => \`
+                    (t) => `
                       <tr>
-                        <td>\${escapeHtml(t.date)}</td>
-                        <td>\${escapeHtml(t.file_name || "ticket.pdf")}</td>
-                        <td>\${escapeHtml(t.source_type || "unknown")}</td>
-                        <td>\${t.updated_at ? escapeHtml(formatDateTimeIST(t.updated_at)) : "-"}</td>
+                        <td>${escapeHtml(t.date)}</td>
+                        <td>${escapeHtml(t.file_name || "ticket.pdf")}</td>
+                        <td>${escapeHtml(t.source_type || "unknown")}</td>
+                        <td>${t.updated_at ? escapeHtml(formatDateTimeIST(t.updated_at)) : "-"}</td>
                         <td>
                           <div class="flex">
-                            <button class="btn btn-secondary" type="button" data-view-pdf="/tickets/\${encodeURIComponent(t.date)}/stream?mode=inline">👁 View</button>
-                            <a class="btn btn-primary" href="/tickets/\${encodeURIComponent(t.date)}/download">⬇ Download</a>
-                            <form method="POST" action="/admin/delete/\${encodeURIComponent(t.date)}" onsubmit="return confirm('Delete ticket for \${escapeHtml(t.date)}?')">
+                            <button class="btn btn-secondary" type="button" data-view-pdf="/tickets/${encodeURIComponent(t.date)}/stream?mode=inline">👁 View</button>
+                            <a class="btn btn-primary" href="/tickets/${encodeURIComponent(t.date)}/download">⬇ Download</a>
+                            <form method="POST" action="/admin/delete/${encodeURIComponent(t.date)}" onsubmit="return confirm('Delete ticket for ${escapeHtml(t.date)}?')">
                               <button class="btn btn-danger" type="submit">🗑 Delete</button>
                             </form>
                           </div>
                         </td>
                       </tr>
-                    \`
+                    `
                   )
                   .join("")}
               </tbody>
             </table>
-          \`
-          : \`<p>No tickets found.</p>\`
+          `
+          : `<p>No tickets found.</p>`
       }
     </div>
 
     <div class="card">
       <h2 class="section-title">📥 Recent Downloads</h2>
-      \${
+      ${
         logs.length
-          ? \`
+          ? `
             <table>
               <thead>
                 <tr>
@@ -1660,25 +1660,25 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
                 </tr>
               </thead>
               <tbody>
-                \${logs
+                ${logs
                   .map(
-                    (l) => \`
+                    (l) => `
                       <tr>
-                        <td>\${escapeHtml(l.username || l.full_name || "unknown")}</td>
-                        <td>\${escapeHtml(l.date || "-")}</td>
-                        <td>\${escapeHtml(l.source || "-")}</td>
-                        <td>\${escapeHtml(formatDateTimeIST(l.time))}</td>
+                        <td>${escapeHtml(l.username || l.full_name || "unknown")}</td>
+                        <td>${escapeHtml(l.date || "-")}</td>
+                        <td>${escapeHtml(l.source || "-")}</td>
+                        <td>${escapeHtml(formatDateTimeIST(l.time))}</td>
                       </tr>
-                    \`
+                    `
                   )
                   .join("")}
               </tbody>
             </table>
-          \`
-          : \`<p>No download logs yet.</p>\`
+          `
+          : `<p>No download logs yet.</p>`
       }
     </div>
-  \`
+  `
   );
 
   res.status(200).send(html);
@@ -1710,10 +1710,10 @@ app.post("/admin/upload", requireAdminLogin, (req, res) => {
         ADMIN_ID,
         file.buffer,
         {
-          caption: \`Web upload saved for \${date}\`,
+          caption: `Web upload saved for ${date}`,
         },
         {
-          filename: file.originalname || \`\${date}.pdf\`,
+          filename: file.originalname || `${date}.pdf`,
           contentType: "application/pdf",
         }
       );
@@ -1730,14 +1730,14 @@ app.post("/admin/upload", requireAdminLogin, (req, res) => {
         date,
         file_id: doc.file_id,
         file_unique_id: doc.file_unique_id,
-        file_name: file.originalname || \`\${date}.pdf\`,
+        file_name: file.originalname || `${date}.pdf`,
         mime_type: "application/pdf",
         file_size: file.size || 0,
         uploaded_at: new Date(),
         source_type: "web_upload",
       });
 
-      setFlashMessage(req, "success", \`Ticket uploaded successfully for \${date}.\`);
+      setFlashMessage(req, "success", `Ticket uploaded successfully for ${date}.`);
       return res.redirect("/admin");
     } catch (error) {
       console.error("admin web upload error:", error);
@@ -1751,7 +1751,7 @@ app.post("/admin/delete/:date", requireAdminLogin, async (req, res) => {
   try {
     const date = req.params.date;
     await ticketsCollection.deleteOne({ date });
-    setFlashMessage(req, "success", \`Ticket deleted for \${date}.\`);
+    setFlashMessage(req, "success", `Ticket deleted for ${date}.`);
     return res.redirect("/admin");
   } catch (err) {
     console.error("delete ticket error:", err);
@@ -1799,8 +1799,8 @@ async function startServer() {
     );
 
     const server = app.listen(PORT, async () => {
-      console.log(\`Server listening on port \${PORT} 🚀\`);
-      console.log(\`Webhook URL: \${WEBHOOK_URL}\`);
+      console.log(`Server listening on port ${PORT} 🚀`);
+      console.log(`Webhook URL: ${WEBHOOK_URL}`);
 
       await bot.setWebHook(WEBHOOK_URL);
       console.log("Telegram webhook set ✅");
