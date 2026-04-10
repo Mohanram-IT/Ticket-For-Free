@@ -1251,6 +1251,48 @@ bot.on("message", async (msg) => {
   }
 });
 
+// bot.on("callback_query", async (query) => {
+//   try {
+//     const data = query.data || "";
+//     const chatId = query.message?.chat?.id;
+
+//     if (!data.startsWith("ticket:")) {
+//       await bot.answerCallbackQuery(query.id);
+//       return;
+//     }
+
+//     const date = data.replace("ticket:", "");
+//     const ticket = await ticketsCollection.findOne({ date });
+
+//     if (!ticket) {
+//       await bot.answerCallbackQuery(query.id, { text: "Ticket not found", show_alert: true });
+//       return;
+//     }
+
+//     await bot.answerCallbackQuery(query.id, { text: `Sending ticket for ${date}` });
+
+//     const sentDoc = await bot.sendDocument(chatId, ticket.file_id, {}, {
+//       filename: ticket.file_name || `${date}.pdf`,
+//       contentType: ticket.mime_type || "application/pdf",
+//     });
+
+//     scheduleDelete(chatId, sentDoc.message_id);
+
+//     await logDownload(query.from, date, "telegram");
+
+//     try {
+//       if (query.message?.message_id) {
+//         await bot.deleteMessage(chatId, String(query.message.message_id));
+//       }
+//     } catch (_) {}
+//   } catch (err) {
+//     console.error("callback_query error:", err);
+//     try {
+//       await bot.answerCallbackQuery(query.id, { text: "Something went wrong", show_alert: true });
+//     } catch (_) {}
+//   }
+// });
+
 bot.on("callback_query", async (query) => {
   try {
     const data = query.data || "";
@@ -1271,24 +1313,47 @@ bot.on("callback_query", async (query) => {
 
     await bot.answerCallbackQuery(query.id, { text: `Sending ticket for ${date}` });
 
-    const sentDoc = await bot.sendDocument(chatId, ticket.file_id, {}, {
-      filename: ticket.file_name || `${date}.pdf`,
-      contentType: ticket.mime_type || "application/pdf",
-    });
+    // ✅ SEND WARNING MESSAGE FIRST
+    const warningMsg = await bot.sendMessage(
+      chatId,
+      `⚠️ Please save this ticket to *Saved Messages*\n\n🕒 This file will auto-delete in 10 minutes.`,
+      { parse_mode: "Markdown" }
+    );
+
+    scheduleDelete(chatId, warningMsg.message_id);
+
+    // ✅ SEND DOCUMENT
+    const sentDoc = await bot.sendDocument(
+      chatId,
+      ticket.file_id,
+      {
+        caption: `🎫 Ticket for ${date}\n\n⚠️ Save this file. It will auto-delete in 10 minutes.`,
+        parse_mode: "Markdown",
+      },
+      {
+        filename: ticket.file_name || `${date}.pdf`,
+        contentType: ticket.mime_type || "application/pdf",
+      }
+    );
 
     scheduleDelete(chatId, sentDoc.message_id);
 
     await logDownload(query.from, date, "telegram");
 
+    // delete menu buttons
     try {
       if (query.message?.message_id) {
         await bot.deleteMessage(chatId, String(query.message.message_id));
       }
     } catch (_) {}
+
   } catch (err) {
     console.error("callback_query error:", err);
     try {
-      await bot.answerCallbackQuery(query.id, { text: "Something went wrong", show_alert: true });
+      await bot.answerCallbackQuery(query.id, {
+        text: "Something went wrong",
+        show_alert: true,
+      });
     } catch (_) {}
   }
 });
