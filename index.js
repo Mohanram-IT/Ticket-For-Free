@@ -1313,32 +1313,59 @@ bot.on("callback_query", async (query) => {
 
     await bot.answerCallbackQuery(query.id, { text: `Sending ticket for ${date}` });
 
-    // ✅ SEND WARNING MESSAGE FIRST
+    // Warning Message First Sent 
     const warningMsg = await bot.sendMessage(
-      chatId,
-      `⚠️ Please save this ticket to *Saved Messages*\n\n🕒 This file will auto-delete in 10 minutes.`,
-      { parse_mode: "Markdown" }
-    );
+  chatId,
+  `⚠️ *Important Notice*
+
+Please save this ticket to *Saved Messages*.
+
+🕒 Auto-delete: *10 minutes*
+
+🔗 [Open Ticket Portal](https://tickets-yercaudexpress.koyeb.app/)`,
+  { parse_mode: "Markdown" }
+);
 
     scheduleDelete(chatId, warningMsg.message_id);
 
+    // // ✅ SEND DOCUMENT
+    // const sentDoc = await bot.sendDocument(
+    //   chatId,
+    //   ticket.file_id,
+    //   {
+    //     caption: `🎫 Ticket for ${date}\n\n⚠️ Save this file. It will auto-delete in 10 minutes.`,
+    //     parse_mode: "Markdown",
+    //   },
+    //   {
+    //     filename: ticket.file_name || `${date}.pdf`,
+    //     contentType: ticket.mime_type || "application/pdf",
+    //   }
+    // );
+
+    // scheduleDelete(chatId, sentDoc.message_id);
+
+    // await logDownload(query.from, date, "telegram");
+
     // ✅ SEND DOCUMENT
-    const sentDoc = await bot.sendDocument(
-      chatId,
-      ticket.file_id,
-      {
-        caption: `🎫 Ticket for ${date}\n\n⚠️ Save this file. It will auto-delete in 10 minutes.`,
-        parse_mode: "Markdown",
-      },
-      {
-        filename: ticket.file_name || `${date}.pdf`,
-        contentType: ticket.mime_type || "application/pdf",
-      }
-    );
+const sentDoc = await bot.sendDocument(
+  chatId,
+  ticket.file_id,
+  {
+    caption:
+      `🎫 <b>Ticket for ${date}</b>\n\n` +
+      `⚠️ Save this file. It will auto-delete in 10 minutes.\n\n` +
+      `🔗 <a href="https://tickets-yercaudexpress.koyeb.app/">Open Ticket Portal</a>`,
+    parse_mode: "HTML",
+  },
+  {
+    filename: ticket.file_name || `${date}.pdf`,
+    contentType: ticket.mime_type || "application/pdf",
+  }
+);
 
-    scheduleDelete(chatId, sentDoc.message_id);
+scheduleDelete(chatId, sentDoc.message_id);
 
-    await logDownload(query.from, date, "telegram");
+await logDownload(query.from, date, "telegram");
 
     // delete menu buttons
     try {
