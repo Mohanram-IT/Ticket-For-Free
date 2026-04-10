@@ -1322,7 +1322,7 @@ Please save this ticket to *Saved Messages*.
 
 🕒 Auto-delete: *10 minutes*
 
-🔗 [Open Ticket Portal](https://tickets-yercaudexpress.koyeb.app/)`,
+🔗 [tickets-yercaudexpress.koyeb.app](https://tickets-yercaudexpress.koyeb.app/)`,
   { parse_mode: "Markdown" }
 );
 
