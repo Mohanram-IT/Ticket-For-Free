@@ -51,6 +51,7 @@ const WEBHOOK_URL = `https://${PUBLIC_DOMAIN}${WEBHOOK_PATH}`;
 const client = new MongoClient(MONGO_URI);
 let ticketsCollection;
 let logsCollection;
+let allowedUsersCollection;
 
 const pendingAdminUploads = new Map();
 
@@ -97,9 +98,11 @@ async function connectDB() {
   const db = client.db("ticket_bot");
   ticketsCollection = db.collection("tickets");
   logsCollection = db.collection("logs");
+  allowedUsersCollection = db.collection("allowed_users");
 
   await ticketsCollection.createIndex({ date: 1 }, { unique: true });
   await logsCollection.createIndex({ time: -1 });
+  await allowedUsersCollection.createIndex({ telegram_id: 1 }, { unique: true });
 
   console.log("MongoDB connected ✅");
 }
@@ -210,6 +213,36 @@ function scheduleDelete(chatId, messageId, delayMs = MENU_DELETE_MS) {
 
 function adminOnly(msg) {
   return msg?.from?.id === ADMIN_ID;
+}
+
+// ---------------- ACCESS CONTROL (private bot whitelist) ----------------
+// ADMIN_ID is always allowed. Additional allowed friends are stored in
+// MongoDB (allowedUsersCollection) and managed from the admin web panel.
+async function getAllowedFriends() {
+  return allowedUsersCollection.find().sort({ added_at: -1 }).toArray();
+}
+
+async function isAllowedUserId(userId) {
+  if (!userId) return false;
+  if (userId === ADMIN_ID) return true;
+
+  const match = await allowedUsersCollection.findOne({ telegram_id: userId });
+  return Boolean(match);
+}
+
+async function addAllowedUser(telegramId, label) {
+  await allowedUsersCollection.updateOne(
+    { telegram_id: telegramId },
+    {
+      $set: { telegram_id: telegramId, label: label || "" },
+      $setOnInsert: { added_at: new Date() },
+    },
+    { upsert: true }
+  );
+}
+
+async function removeAllowedUser(telegramId) {
+  await allowedUsersCollection.deleteOne({ telegram_id: telegramId });
 }
 
 function requireAdminLogin(req, res, next) {
@@ -1106,6 +1139,16 @@ function dashboardLayout(title, content) {
 bot.onText(/\/start/, async (msg) => {
   try {
     const chatId = msg.chat.id;
+
+    if (!(await isAllowedUserId(msg.from?.id))) {
+      const denied = await bot.sendMessage(
+        chatId,
+        "❌ This is a private bot. You are not authorized to use it."
+      );
+      scheduleDelete(chatId, denied.message_id);
+      return;
+    }
+
     scheduleDelete(chatId, msg.message_id);
 
     const tickets = await getValidTickets();
@@ -1297,6 +1340,14 @@ bot.on("callback_query", async (query) => {
   try {
     const data = query.data || "";
     const chatId = query.message?.chat?.id;
+
+    if (!(await isAllowedUserId(query.from?.id))) {
+      await bot.answerCallbackQuery(query.id, {
+        text: "Access denied",
+        show_alert: true,
+      });
+      return;
+    }
 
     if (!data.startsWith("ticket:")) {
       await bot.answerCallbackQuery(query.id);
@@ -1616,6 +1667,7 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
   const logs = await logsCollection.find().sort({ time: -1 }).limit(25).toArray();
   const totalDownloads = await logsCollection.countDocuments();
   const validTickets = await getValidTickets();
+  const allowedFriends = await getAllowedFriends();
   const flash = getFlashMessage(req);
 
   const html = dashboardLayout(
@@ -1738,6 +1790,63 @@ app.get("/admin", requireAdminLogin, async (req, res) => {
     </div>
 
     <div class="card">
+      <h2 class="section-title">👥 Allowed Users</h2>
+      <p class="subtle small" style="margin-top:0;">
+        You (admin) always have access. Add a friend's numeric Telegram ID below to let them use /start and download tickets. They can get their ID from a bot like @userinfobot.
+      </p>
+      <form method="POST" action="/admin/allowed-users/add" style="margin-top:12px;">
+        <div class="row-3">
+          <div>
+            <label class="small muted">Telegram ID</label>
+            <input type="text" name="telegram_id" inputmode="numeric" placeholder="e.g. 987654321" required />
+          </div>
+          <div>
+            <label class="small muted">Label (optional)</label>
+            <input type="text" name="label" placeholder="e.g. Friend name" />
+          </div>
+          <div style="display:flex; align-items:end;">
+            <button class="btn btn-primary" type="submit">➕ Add Friend</button>
+          </div>
+        </div>
+      </form>
+
+      ${
+        allowedFriends.length
+          ? `
+            <table style="margin-top:16px;">
+              <thead>
+                <tr>
+                  <th>Telegram ID</th>
+                  <th>Label</th>
+                  <th>Added</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${allowedFriends
+                  .map(
+                    (u) => `
+                      <tr>
+                        <td>${escapeHtml(u.telegram_id)}</td>
+                        <td>${escapeHtml(u.label || "-")}</td>
+                        <td>${u.added_at ? escapeHtml(formatDateTimeIST(u.added_at)) : "-"}</td>
+                        <td>
+                          <form method="POST" action="/admin/allowed-users/delete/${encodeURIComponent(u.telegram_id)}" onsubmit="return confirm('Remove access for ${escapeHtml(u.telegram_id)}?')">
+                            <button class="btn btn-danger" type="submit">🗑 Remove</button>
+                          </form>
+                        </td>
+                      </tr>
+                    `
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          `
+          : `<p style="margin-top:16px;">No friends added yet — only you (admin) can use the bot.</p>`
+      }
+    </div>
+
+    <div class="card">
       <h2 class="section-title">📥 Recent Downloads</h2>
       ${
         logs.length
@@ -1848,6 +1957,51 @@ app.post("/admin/delete/:date", requireAdminLogin, async (req, res) => {
   } catch (err) {
     console.error("delete ticket error:", err);
     setFlashMessage(req, "error", "Failed to delete ticket.");
+    return res.redirect("/admin");
+  }
+});
+
+// ---------------- ADMIN: ALLOWED USERS (bot whitelist) ----------------
+app.post("/admin/allowed-users/add", requireAdminLogin, async (req, res) => {
+  try {
+    const rawId = String(req.body?.telegram_id || "").trim();
+    const label = String(req.body?.label || "").trim();
+    const telegramId = Number(rawId);
+
+    if (!rawId || !Number.isFinite(telegramId) || !Number.isInteger(telegramId)) {
+      setFlashMessage(req, "error", "Please enter a valid numeric Telegram ID.");
+      return res.redirect("/admin");
+    }
+
+    if (telegramId === ADMIN_ID) {
+      setFlashMessage(req, "error", "That ID is already the admin.");
+      return res.redirect("/admin");
+    }
+
+    await addAllowedUser(telegramId, label);
+    setFlashMessage(req, "success", `Added ${label || telegramId} to allowed users.`);
+    return res.redirect("/admin");
+  } catch (err) {
+    console.error("add allowed user error:", err);
+    setFlashMessage(req, "error", "Failed to add allowed user.");
+    return res.redirect("/admin");
+  }
+});
+
+app.post("/admin/allowed-users/delete/:telegramId", requireAdminLogin, async (req, res) => {
+  try {
+    const telegramId = Number(req.params.telegramId);
+    if (!Number.isFinite(telegramId)) {
+      setFlashMessage(req, "error", "Invalid Telegram ID.");
+      return res.redirect("/admin");
+    }
+
+    await removeAllowedUser(telegramId);
+    setFlashMessage(req, "success", `Removed access for ${telegramId}.`);
+    return res.redirect("/admin");
+  } catch (err) {
+    console.error("remove allowed user error:", err);
+    setFlashMessage(req, "error", "Failed to remove allowed user.");
     return res.redirect("/admin");
   }
 });
